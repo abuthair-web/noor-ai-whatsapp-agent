@@ -1,10 +1,13 @@
-import { runAgent } from "../agent/agent.js";
+import { runAgent } from "../.agent/agent.js";
 import { sendWhatsAppMessage } from "../services/whatsapp.js";
 
 /*
 |--------------------------------------------------------------------------
-| Meta Webhook Verification
+| WhatsApp Webhook Verification
 |--------------------------------------------------------------------------
+|
+| Meta sends a GET request when you configure the WhatsApp webhook.
+|
 */
 
 export function handleWebhookVerification(req, res) {
@@ -19,7 +22,7 @@ export function handleWebhookVerification(req, res) {
     token &&
     token === verifyToken
   ) {
-    console.log("WhatsApp webhook verified.");
+    console.log("WhatsApp webhook verified successfully.");
 
     return res.status(200).send(challenge);
   }
@@ -31,22 +34,25 @@ export function handleWebhookVerification(req, res) {
 
 /*
 |--------------------------------------------------------------------------
-| Incoming WhatsApp Webhook
+| WhatsApp Incoming Webhook
 |--------------------------------------------------------------------------
 */
 
 export async function handleWebhook(req, res) {
   /*
-   * Acknowledge Meta immediately.
+   * Meta expects a quick HTTP 200 response.
    */
   res.sendStatus(200);
 
   try {
     console.log(
-      "WhatsApp webhook:",
+      "Incoming WhatsApp webhook:",
       JSON.stringify(req.body, null, 2)
     );
 
+    /*
+     * Extract the WhatsApp message.
+     */
     const entry = req.body?.entry?.[0];
     const change = entry?.changes?.[0];
     const value = change?.value;
@@ -54,9 +60,10 @@ export async function handleWebhook(req, res) {
     const message = value?.messages?.[0];
 
     /*
-     * Ignore status updates and other webhook events.
+     * Ignore webhook events that are not messages.
      */
     if (!message) {
+      console.log("Webhook event contains no message.");
       return;
     }
 
@@ -65,7 +72,7 @@ export async function handleWebhook(req, res) {
      */
     if (message.type !== "text") {
       console.log(
-        `Unsupported message type: ${message.type}`
+        `Unsupported WhatsApp message type: ${message.type}`
       );
 
       return;
@@ -75,6 +82,7 @@ export async function handleWebhook(req, res) {
     const customerMessage = message.text?.body?.trim();
 
     if (!customerPhone || !customerMessage) {
+      console.log("Message is missing phone number or text.");
       return;
     }
 
@@ -83,7 +91,7 @@ export async function handleWebhook(req, res) {
     );
 
     /*
-     * Run Noor AI.
+     * Run Noor AI Agent.
      */
     const result = await runAgent(
       customerMessage,
@@ -93,20 +101,25 @@ export async function handleWebhook(req, res) {
     );
 
     /*
-     * Send AI response.
+     * Send the AI response back to WhatsApp.
      */
+    if (!result?.reply) {
+      console.log("Agent returned no reply.");
+      return;
+    }
+
     await sendWhatsAppMessage(
       customerPhone,
       result.reply
     );
 
     console.log(
-      `Reply sent to ${customerPhone}`
+      `Noor AI reply sent to ${customerPhone}`
     );
 
   } catch (error) {
     console.error(
-      "Webhook processing error:",
+      "WhatsApp webhook processing error:",
       error
     );
   }
