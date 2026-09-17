@@ -1,15 +1,15 @@
-import { runAgent } from "../.agent/agent.js";
+import { runAgent } from "../agent/agent.js";
 import { sendWhatsAppMessage } from "../services/whatsapp.js";
 
 /*
 |--------------------------------------------------------------------------
-| WhatsApp Webhook Verification
+| Noor AI WhatsApp Webhook
 |--------------------------------------------------------------------------
-|
-| Meta sends a GET request when you configure the WhatsApp webhook.
-|
 */
 
+/**
+ * Meta WhatsApp webhook verification
+ */
 export function handleWebhookVerification(req, res) {
   const mode = req.query["hub.mode"];
   const token = req.query["hub.verify_token"];
@@ -17,110 +17,169 @@ export function handleWebhookVerification(req, res) {
 
   const verifyToken = process.env.WHATSAPP_VERIFY_TOKEN;
 
+  console.log("Webhook verification request received.");
+
   if (
     mode === "subscribe" &&
-    token &&
-    token === verifyToken
+    token === verifyToken &&
+    challenge
   ) {
-    console.log("WhatsApp webhook verified successfully.");
+    console.log("Noor AI WhatsApp webhook verified successfully.");
 
     return res.status(200).send(challenge);
   }
 
-  console.log("WhatsApp webhook verification failed.");
+  console.log("Noor AI WhatsApp webhook verification failed.");
 
   return res.sendStatus(403);
 }
 
-/*
-|--------------------------------------------------------------------------
-| WhatsApp Incoming Webhook
-|--------------------------------------------------------------------------
-*/
 
+/**
+ * Receive WhatsApp messages from Meta
+ */
 export async function handleWebhook(req, res) {
+
   /*
-   * Meta expects a quick HTTP 200 response.
+   * Tell Meta that the webhook was received.
+   * This must happen quickly.
    */
   res.sendStatus(200);
 
   try {
+
     console.log(
       "Incoming WhatsApp webhook:",
       JSON.stringify(req.body, null, 2)
     );
 
     /*
-     * Extract the WhatsApp message.
+     * Extract Meta webhook data
      */
     const entry = req.body?.entry?.[0];
+
     const change = entry?.changes?.[0];
+
     const value = change?.value;
 
     const message = value?.messages?.[0];
 
+
     /*
-     * Ignore webhook events that are not messages.
+     * Ignore events that don't contain a message.
+     *
+     * Meta also sends status updates such as:
+     * sent
+     * delivered
+     * read
      */
     if (!message) {
-      console.log("Webhook event contains no message.");
+      console.log("No customer message found.");
       return;
     }
 
+
     /*
-     * Currently process text messages.
+     * Currently support text messages.
      */
     if (message.type !== "text") {
+
       console.log(
-        `Unsupported WhatsApp message type: ${message.type}`
+        `Unsupported message type: ${message.type}`
       );
 
       return;
     }
 
+
+    /*
+     * Customer WhatsApp number
+     */
     const customerPhone = message.from;
-    const customerMessage = message.text?.body?.trim();
+
+
+    /*
+     * Customer's message
+     */
+    const customerMessage =
+      message.text?.body?.trim();
+
 
     if (!customerPhone || !customerMessage) {
-      console.log("Message is missing phone number or text.");
+
+      console.log(
+        "Customer phone number or message is missing."
+      );
+
       return;
     }
+
 
     console.log(
       `Customer ${customerPhone}: ${customerMessage}`
     );
 
+
     /*
-     * Run Noor AI Agent.
+     |--------------------------------------------------------------------------
+     | Noor AI Agent
+     |--------------------------------------------------------------------------
      */
-    const result = await runAgent(
+
+    const agentResult = await runAgent(
       customerMessage,
       {
-        customerPhone
+        customerPhone,
+        businessId:
+          process.env.BUSINESS_ID || "demo-business"
       }
     );
 
+
     /*
-     * Send the AI response back to WhatsApp.
+     * Make sure the agent actually produced a reply.
      */
-    if (!result?.reply) {
-      console.log("Agent returned no reply.");
+    if (
+      !agentResult ||
+      !agentResult.reply
+    ) {
+
+      console.log(
+        "Noor AI Agent returned no response."
+      );
+
       return;
     }
 
-    await sendWhatsAppMessage(
-      customerPhone,
-      result.reply
-    );
 
     console.log(
-      `Noor AI reply sent to ${customerPhone}`
+      `Noor AI Agent reply: ${agentResult.reply}`
     );
 
+
+    /*
+     |--------------------------------------------------------------------------
+     | Send response back to WhatsApp
+     |--------------------------------------------------------------------------
+     */
+
+    await sendWhatsAppMessage(
+      customerPhone,
+      agentResult.reply
+    );
+
+
+    console.log(
+      `Noor AI response sent to ${customerPhone}`
+    );
+
+
   } catch (error) {
+
     console.error(
-      "WhatsApp webhook processing error:",
+      "Noor AI WhatsApp webhook error:",
       error
     );
+
   }
 }
