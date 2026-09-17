@@ -1,0 +1,55 @@
+{
+  "business_id": "demo-business",
+  "business_name": "Grand Noor Hotel",
+  "business_type": "hotel",
+  "description": "Grand Noor Hotel is a demonstration business used for testing the Noor AI Business Agent.",
+  "contact": {
+    "phone": "+91 90000 00000",
+    "email": "demo@grandnoor.example"
+  },
+  "location": {
+    "address": "123 Demo Road, Salem, Tamil Nadu, India",
+    "landmark": "Near Central Bus Stand"
+  },
+  "hours": {
+    "monday": "Open 24 hours",
+    "tuesday": "Open 24 hours",
+    "wednesday": "Open 24 hours",
+    "thursday": "Open 24 hours",
+    "friday": "Open 24 hours",
+    "saturday": "Open 24 hours",
+    "sunday": "Open 24 hours"
+  },
+  "services": [
+    "Room booking",
+    "Room availability",
+    "Booking modification",
+    "Booking cancellation",
+    "Customer support"
+  ],
+  "rooms": [
+    {
+      "room_id": "standard-101",
+      "name": "Standard Room",
+      "description": "Comfortable standard room for demonstration purposes.",
+      "capacity": 2,
+      "price_per_night": 2500,
+      "currency": "INR",
+      "available": true
+    },
+    {
+      "room_id": "deluxe-201",
+      "name": "Deluxe Room",
+      "description": "Spacious deluxe room for demonstration purposes.",
+      "capacity": 3,
+      "price_per_night": 4000,
+      "currency": "INR",
+      "available": true
+    }
+  ],
+  "policies": {
+    "booking": "Bookings require customer details and confirmation.",
+    "cancellation": "Cancellation is subject to the booking policy.",
+    "payment": "Payment status must be confirmed by the payment system before a booking is marked as paid."
+  }
+}
