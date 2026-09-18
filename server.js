@@ -2,6 +2,7 @@ import express from "express";
 import "dotenv/config";
 
 import { handleWebhookVerification, handleWebhook } from "./routes/webhook.js";
+import { testDatabaseConnection } from "./services/database.js";
 
 const app = express();
 
