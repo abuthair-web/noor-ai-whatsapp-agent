@@ -1,3 +1,4 @@
+import { Type } from "@google/genai";
 import { getBusiness } from "../config/business.js";
 
 /*
@@ -5,42 +6,179 @@ import { getBusiness } from "../config/business.js";
 | Noor AI Tool Registry
 |--------------------------------------------------------------------------
 |
-| These tools are the action layer of Noor AI.
+| Each tool contains:
+| - description
+| - parameters
+| - execute()
 |
-| Later, these functions will connect to Supabase, payment providers,
-| booking systems, CRM systems and notification services.
+| Gemini uses the description + parameters to decide when to call a tool.
 |
 |--------------------------------------------------------------------------
 */
 
 export const tools = {
-  get_business_info,
-  search_knowledge,
+  get_business_info: {
+    description:
+      "Get complete information about the business, including name, type, location, hours, services, rooms, prices and policies.",
 
-  search_availability,
-  create_booking,
-  modify_booking,
-  cancel_booking,
+    parameters: {
+      type: Type.OBJECT,
+      properties: {}
+    },
 
-  create_customer,
-  get_customer,
-  update_customer,
+    execute: get_business_info
+  },
 
-  search_products,
-  create_order,
-  update_order,
-  cancel_order,
+  search_knowledge: {
+    description:
+      "Search the business knowledge for information relevant to the customer's question.",
 
-  create_payment,
-  verify_payment,
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        query: {
+          type: Type.STRING,
+          description: "The information the customer is asking about."
+        }
+      },
+      required: ["query"]
+    },
 
-  create_reminder,
-  cancel_reminder,
+    execute: search_knowledge
+  },
 
-  create_lead,
-  update_lead,
+  search_availability: {
+    description:
+      "Check which hotel rooms are available for the requested dates and number of guests.",
 
-  transfer_to_human
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        check_in: {
+          type: Type.STRING,
+          description: "Check-in date in YYYY-MM-DD format."
+        },
+        check_out: {
+          type: Type.STRING,
+          description: "Check-out date in YYYY-MM-DD format."
+        },
+        guests: {
+          type: Type.NUMBER,
+          description: "Number of guests."
+        }
+      },
+      required: ["check_in", "check_out", "guests"]
+    },
+
+    execute: search_availability
+  },
+
+  create_booking: {
+    description:
+      "Create a hotel booking. Only use this when all required booking information has been collected.",
+
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        customer_name: {
+          type: Type.STRING,
+          description: "Customer full name."
+        },
+        customer_phone: {
+          type: Type.STRING,
+          description: "Customer WhatsApp phone number."
+        },
+        room_id: {
+          type: Type.STRING,
+          description: "ID of the selected room."
+        },
+        check_in: {
+          type: Type.STRING,
+          description: "Check-in date in YYYY-MM-DD format."
+        },
+        check_out: {
+          type: Type.STRING,
+          description: "Check-out date in YYYY-MM-DD format."
+        },
+        guests: {
+          type: Type.NUMBER,
+          description: "Number of guests."
+        }
+      },
+      required: [
+        "customer_name",
+        "customer_phone",
+        "room_id",
+        "check_in",
+        "check_out",
+        "guests"
+      ]
+    },
+
+    execute: create_booking
+  },
+
+  create_customer: {
+    description:
+      "Create a customer record in the business customer database.",
+
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        name: {
+          type: Type.STRING,
+          description: "Customer full name."
+        },
+        phone: {
+          type: Type.STRING,
+          description: "Customer WhatsApp phone number."
+        },
+        email: {
+          type: Type.STRING,
+          description: "Customer email address, if available."
+        }
+      },
+      required: ["name", "phone"]
+    },
+
+    execute: create_customer
+  },
+
+  get_customer: {
+    description:
+      "Find an existing customer using their phone number.",
+
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        phone: {
+          type: Type.STRING,
+          description: "Customer WhatsApp phone number."
+        }
+      },
+      required: ["phone"]
+    },
+
+    execute: get_customer
+  },
+
+  transfer_to_human: {
+    description:
+      "Transfer the conversation to a human staff member when the customer requests human assistance or the AI cannot safely handle the request.",
+
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        reason: {
+          type: Type.STRING,
+          description: "Reason for requesting human assistance."
+        }
+      },
+      required: ["reason"]
+    },
+
+    execute: transfer_to_human
+  }
 };
 
 /*
@@ -138,26 +276,6 @@ async function create_booking(data = {}) {
   };
 }
 
-async function modify_booking(data = {}) {
-  return {
-    success: false,
-    status: "not_connected",
-    message:
-      "The booking system is not connected yet. No booking was modified.",
-    requested_data: data
-  };
-}
-
-async function cancel_booking(data = {}) {
-  return {
-    success: false,
-    status: "not_connected",
-    message:
-      "The booking system is not connected yet. No booking was cancelled.",
-    requested_data: data
-  };
-}
-
 /*
 |--------------------------------------------------------------------------
 | CUSTOMERS
@@ -180,146 +298,6 @@ async function get_customer(data = {}) {
     status: "not_connected",
     message:
       "The customer database is not connected yet.",
-    requested_data: data
-  };
-}
-
-async function update_customer(data = {}) {
-  return {
-    success: false,
-    status: "not_connected",
-    message:
-      "The customer database is not connected yet.",
-    requested_data: data
-  };
-}
-
-/*
-|--------------------------------------------------------------------------
-| PRODUCTS
-|--------------------------------------------------------------------------
-*/
-
-async function search_products(data = {}) {
-  return {
-    success: false,
-    status: "not_connected",
-    message:
-      "The product database is not connected yet.",
-    requested_data: data
-  };
-}
-
-/*
-|--------------------------------------------------------------------------
-| ORDERS
-|--------------------------------------------------------------------------
-*/
-
-async function create_order(data = {}) {
-  return {
-    success: false,
-    status: "not_connected",
-    message:
-      "The order system is not connected yet. No order was created.",
-    requested_data: data
-  };
-}
-
-async function update_order(data = {}) {
-  return {
-    success: false,
-    status: "not_connected",
-    message:
-      "The order system is not connected yet. No order was updated.",
-    requested_data: data
-  };
-}
-
-async function cancel_order(data = {}) {
-  return {
-    success: false,
-    status: "not_connected",
-    message:
-      "The order system is not connected yet. No order was cancelled.",
-    requested_data: data
-  };
-}
-
-/*
-|--------------------------------------------------------------------------
-| PAYMENTS
-|--------------------------------------------------------------------------
-*/
-
-async function create_payment(data = {}) {
-  return {
-    success: false,
-    status: "not_connected",
-    message:
-      "The payment provider is not connected yet. No payment request was created.",
-    requested_data: data
-  };
-}
-
-async function verify_payment(data = {}) {
-  return {
-    success: false,
-    status: "not_connected",
-    message:
-      "The payment provider is not connected yet. Payment has not been verified.",
-    requested_data: data
-  };
-}
-
-/*
-|--------------------------------------------------------------------------
-| REMINDERS
-|--------------------------------------------------------------------------
-*/
-
-async function create_reminder(data = {}) {
-  return {
-    success: false,
-    status: "not_connected",
-    message:
-      "The reminder service is not connected yet.",
-    requested_data: data
-  };
-}
-
-async function cancel_reminder(data = {}) {
-  return {
-    success: false,
-    status: "not_connected",
-    message:
-      "The reminder service is not connected yet.",
-    requested_data: data
-  };
-}
-
-/*
-|--------------------------------------------------------------------------
-| CRM
-|--------------------------------------------------------------------------
-*/
-
-async function create_lead(data = {}) {
-  return {
-    success: false,
-    status: "not_connected",
-    message:
-      "The CRM database is not connected yet.",
-    requested_data: data
-  };
-}
-
-async function update_lead(data = {}) {
-  return {
-    success: false,
-    status: "not_connected",
-    message:
-      "The CRM database is not connected yet.",
     requested_data: data
   };
 }
