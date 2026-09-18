@@ -1,5 +1,5 @@
 import { Type } from "@google/genai";
-import { getBusiness } from "../config/business.js";
+import { getSupabase } from "../services/database.js";
 
 /*
 |--------------------------------------------------------------------------
@@ -19,7 +19,7 @@ import { getBusiness } from "../config/business.js";
 export const tools = {
   get_business_info: {
     description:
-      "Get complete information about the business, including name, type, location, hours, services, rooms, prices and policies.",
+      "Get complete information about the business, including name, type, location, phone, email, description and other business details.",
 
     parameters: {
       type: Type.OBJECT,
@@ -38,7 +38,8 @@ export const tools = {
       properties: {
         query: {
           type: Type.STRING,
-          description: "The information the customer is asking about."
+          description:
+            "The information the customer is asking about."
         }
       },
       required: ["query"]
@@ -56,18 +57,28 @@ export const tools = {
       properties: {
         check_in: {
           type: Type.STRING,
-          description: "Check-in date in YYYY-MM-DD format."
+          description:
+            "Check-in date in YYYY-MM-DD format."
         },
+
         check_out: {
           type: Type.STRING,
-          description: "Check-out date in YYYY-MM-DD format."
+          description:
+            "Check-out date in YYYY-MM-DD format."
         },
+
         guests: {
           type: Type.NUMBER,
-          description: "Number of guests."
+          description:
+            "Number of guests."
         }
       },
-      required: ["check_in", "check_out", "guests"]
+
+      required: [
+        "check_in",
+        "check_out",
+        "guests"
+      ]
     },
 
     execute: search_availability
@@ -82,29 +93,41 @@ export const tools = {
       properties: {
         customer_name: {
           type: Type.STRING,
-          description: "Customer full name."
+          description:
+            "Customer full name."
         },
+
         customer_phone: {
           type: Type.STRING,
-          description: "Customer WhatsApp phone number."
+          description:
+            "Customer WhatsApp phone number."
         },
+
         room_id: {
           type: Type.STRING,
-          description: "ID of the selected room."
+          description:
+            "ID of the selected room."
         },
+
         check_in: {
           type: Type.STRING,
-          description: "Check-in date in YYYY-MM-DD format."
+          description:
+            "Check-in date in YYYY-MM-DD format."
         },
+
         check_out: {
           type: Type.STRING,
-          description: "Check-out date in YYYY-MM-DD format."
+          description:
+            "Check-out date in YYYY-MM-DD format."
         },
+
         guests: {
           type: Type.NUMBER,
-          description: "Number of guests."
+          description:
+            "Number of guests."
         }
       },
+
       required: [
         "customer_name",
         "customer_phone",
@@ -127,18 +150,27 @@ export const tools = {
       properties: {
         name: {
           type: Type.STRING,
-          description: "Customer full name."
+          description:
+            "Customer full name."
         },
+
         phone: {
           type: Type.STRING,
-          description: "Customer WhatsApp phone number."
+          description:
+            "Customer WhatsApp phone number."
         },
+
         email: {
           type: Type.STRING,
-          description: "Customer email address, if available."
+          description:
+            "Customer email address, if available."
         }
       },
-      required: ["name", "phone"]
+
+      required: [
+        "name",
+        "phone"
+      ]
     },
 
     execute: create_customer
@@ -153,10 +185,14 @@ export const tools = {
       properties: {
         phone: {
           type: Type.STRING,
-          description: "Customer WhatsApp phone number."
+          description:
+            "Customer WhatsApp phone number."
         }
       },
-      required: ["phone"]
+
+      required: [
+        "phone"
+      ]
     },
 
     execute: get_customer
@@ -171,15 +207,20 @@ export const tools = {
       properties: {
         reason: {
           type: Type.STRING,
-          description: "Reason for requesting human assistance."
+          description:
+            "Reason for requesting human assistance."
         }
       },
-      required: ["reason"]
+
+      required: [
+        "reason"
+      ]
     },
 
     execute: transfer_to_human
   }
 };
+
 
 /*
 |--------------------------------------------------------------------------
@@ -188,13 +229,32 @@ export const tools = {
 */
 
 async function get_business_info() {
-  const business = getBusiness();
+
+  const db = getSupabase();
+
+  const businessId =
+    process.env.BUSINESS_ID || "demo-business";
+
+  const { data, error } = await db
+    .from("businesses")
+    .select("*")
+    .eq("business_id", businessId)
+    .single();
+
+  if (error) {
+
+    throw new Error(
+      `Failed to load business information: ${error.message}`
+    );
+
+  }
 
   return {
     success: true,
-    business
+    business: data
   };
 }
+
 
 /*
 |--------------------------------------------------------------------------
@@ -202,35 +262,64 @@ async function get_business_info() {
 |--------------------------------------------------------------------------
 */
 
-async function search_knowledge({ query = "" } = {}) {
-  const business = getBusiness();
+async function search_knowledge({
+  query = ""
+} = {}) {
+
+  const db = getSupabase();
+
+  const businessId =
+    process.env.BUSINESS_ID || "demo-business";
+
+  const { data, error } = await db
+    .from("businesses")
+    .select("*")
+    .eq("business_id", businessId)
+    .single();
+
+  if (error) {
+
+    throw new Error(
+      `Failed to search business knowledge: ${error.message}`
+    );
+
+  }
 
   if (!query) {
+
     return {
       success: true,
-      result: business
+      result: data
     };
+
   }
 
   const searchableBusiness =
-    JSON.stringify(business).toLowerCase();
+    JSON.stringify(data).toLowerCase();
 
-  const searchQuery = query.toLowerCase();
+  const searchQuery =
+    query.toLowerCase();
 
-  if (searchableBusiness.includes(searchQuery)) {
+  if (
+    searchableBusiness.includes(searchQuery)
+  ) {
+
     return {
       success: true,
       query,
-      result: business
+      result: data
     };
+
   }
 
   return {
     success: false,
     query,
-    message: "No matching business information was found."
+    message:
+      "No matching business information was found."
   };
 }
+
 
 /*
 |--------------------------------------------------------------------------
@@ -243,22 +332,36 @@ async function search_availability({
   check_out,
   guests = 1
 } = {}) {
-  const business = getBusiness();
 
-  const rooms = (business.rooms || []).filter(
-    room =>
-      room.available === true &&
-      room.capacity >= Number(guests)
-  );
+  const db = getSupabase();
+
+  const businessId =
+    process.env.BUSINESS_ID || "demo-business";
+
+  const { data: rooms, error } = await db
+    .from("rooms")
+    .select("*")
+    .eq("business_id", businessId)
+    .eq("status", "available")
+    .gte("capacity", Number(guests));
+
+  if (error) {
+
+    throw new Error(
+      `Failed to search room availability: ${error.message}`
+    );
+
+  }
 
   return {
     success: true,
     check_in,
     check_out,
     guests,
-    available_rooms: rooms
+    available_rooms: rooms || []
   };
 }
+
 
 /*
 |--------------------------------------------------------------------------
@@ -267,14 +370,19 @@ async function search_availability({
 */
 
 async function create_booking(data = {}) {
+
   return {
     success: false,
     status: "not_connected",
+
     message:
       "The booking system is not connected yet. No booking was created.",
+
     requested_data: data
   };
+
 }
+
 
 /*
 |--------------------------------------------------------------------------
@@ -283,24 +391,34 @@ async function create_booking(data = {}) {
 */
 
 async function create_customer(data = {}) {
+
   return {
     success: false,
     status: "not_connected",
+
     message:
       "The customer database is not connected yet.",
+
     requested_data: data
   };
+
 }
 
+
 async function get_customer(data = {}) {
+
   return {
     success: false,
     status: "not_connected",
+
     message:
       "The customer database is not connected yet.",
+
     requested_data: data
   };
+
 }
+
 
 /*
 |--------------------------------------------------------------------------
@@ -309,11 +427,17 @@ async function get_customer(data = {}) {
 */
 
 async function transfer_to_human(data = {}) {
+
   return {
     success: true,
-    status: "human_handoff_requested",
+
+    status:
+      "human_handoff_requested",
+
     message:
       "The conversation has been marked for human assistance.",
+
     requested_data: data
   };
+
 }
