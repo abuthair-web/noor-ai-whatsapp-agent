@@ -1,88 +1,140 @@
 import { runAgent } from "../agent/agent.js";
 import { sendWhatsAppMessage } from "../services/whatsapp.js";
 
+import {
+  getCustomerByPhone,
+  createCustomerRecord,
+  getOrCreateConversation,
+  saveMessage
+} from "../services/database.js";
+
+
 /*
 |--------------------------------------------------------------------------
-| Noor AI WhatsApp Webhook
+| WEBHOOK VERIFICATION
 |--------------------------------------------------------------------------
 */
 
-/**
- * Meta WhatsApp webhook verification
- */
-export function handleWebhookVerification(req, res) {
-  const mode = req.query["hub.mode"];
-  const token = req.query["hub.verify_token"];
-  const challenge = req.query["hub.challenge"];
+export function handleWebhookVerification(
+  req,
+  res
+) {
 
-  const verifyToken = process.env.WHATSAPP_VERIFY_TOKEN;
+  const mode =
+    req.query["hub.mode"];
 
-  console.log("Webhook verification request received.");
+  const token =
+    req.query["hub.verify_token"];
+
+  const challenge =
+    req.query["hub.challenge"];
+
+  const verifyToken =
+    process.env.WHATSAPP_VERIFY_TOKEN;
+
+  console.log(
+    "Webhook verification request received."
+  );
 
   if (
     mode === "subscribe" &&
     token === verifyToken &&
     challenge
   ) {
-    console.log("Noor AI WhatsApp webhook verified successfully.");
 
-    return res.status(200).send(challenge);
+    console.log(
+      "Noor AI WhatsApp webhook verified successfully."
+    );
+
+    return res
+      .status(200)
+      .send(challenge);
   }
 
-  console.log("Noor AI WhatsApp webhook verification failed.");
+  console.log(
+    "Noor AI WhatsApp webhook verification failed."
+  );
 
   return res.sendStatus(403);
 }
 
 
-/**
- * Receive WhatsApp messages from Meta
- */
-export async function handleWebhook(req, res) {
+/*
+|--------------------------------------------------------------------------
+| WHATSAPP WEBHOOK
+|--------------------------------------------------------------------------
+*/
+
+export async function handleWebhook(
+  req,
+  res
+) {
 
   /*
-   * Tell Meta that the webhook was received.
-   * This must happen quickly.
-   */
+  |--------------------------------------------------------------------------
+  | Respond to Meta immediately
+  |--------------------------------------------------------------------------
+  */
+
   res.sendStatus(200);
+
 
   try {
 
     console.log(
       "Incoming WhatsApp webhook:",
-      JSON.stringify(req.body, null, 2)
+      JSON.stringify(
+        req.body,
+        null,
+        2
+      )
     );
 
-    /*
-     * Extract Meta webhook data
-     */
-    const entry = req.body?.entry?.[0];
-
-    const change = entry?.changes?.[0];
-
-    const value = change?.value;
-
-    const message = value?.messages?.[0];
-
 
     /*
-     * Ignore events that don't contain a message.
-     *
-     * Meta also sends status updates such as:
-     * sent
-     * delivered
-     * read
-     */
+    |--------------------------------------------------------------------------
+    | Extract webhook data
+    |--------------------------------------------------------------------------
+    */
+
+    const entry =
+      req.body?.entry?.[0];
+
+    const change =
+      entry?.changes?.[0];
+
+    const value =
+      change?.value;
+
+    const message =
+      value?.messages?.[0];
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | Ignore status webhooks
+    |--------------------------------------------------------------------------
+    */
+
     if (!message) {
-      console.log("No customer message found.");
+
+      console.log(
+        "No customer message found."
+      );
+
       return;
     }
 
 
     /*
-     * Currently support text messages.
-     */
-    if (message.type !== "text") {
+    |--------------------------------------------------------------------------
+    | Supported message type
+    |--------------------------------------------------------------------------
+    */
+
+    if (
+      message.type !== "text"
+    ) {
 
       console.log(
         `Unsupported message type: ${message.type}`
@@ -93,19 +145,22 @@ export async function handleWebhook(req, res) {
 
 
     /*
-     * Customer WhatsApp number
-     */
-    const customerPhone = message.from;
+    |--------------------------------------------------------------------------
+    | Customer information
+    |--------------------------------------------------------------------------
+    */
 
+    const customerPhone =
+      message.from;
 
-    /*
-     * Customer's message
-     */
     const customerMessage =
       message.text?.body?.trim();
 
 
-    if (!customerPhone || !customerMessage) {
+    if (
+      !customerPhone ||
+      !customerMessage
+    ) {
 
       console.log(
         "Customer phone number or message is missing."
@@ -115,30 +170,104 @@ export async function handleWebhook(req, res) {
     }
 
 
+    const businessId =
+      process.env.BUSINESS_ID ||
+      "demo-business";
+
+
     console.log(
       `Customer ${customerPhone}: ${customerMessage}`
     );
 
 
     /*
-     |--------------------------------------------------------------------------
-     | Noor AI Agent
-     |--------------------------------------------------------------------------
-     */
+    |--------------------------------------------------------------------------
+    | Find or create customer
+    |--------------------------------------------------------------------------
+    */
 
-    const agentResult = await runAgent(
-      customerMessage,
-      {
-        customerPhone,
-        businessId:
-          process.env.BUSINESS_ID || "demo-business"
-      }
+    let customer =
+      await getCustomerByPhone(
+        businessId,
+        customerPhone
+      );
+
+
+    if (!customer) {
+
+      customer =
+        await createCustomerRecord({
+          businessId,
+          name:
+            "WhatsApp Customer",
+          phone:
+            customerPhone
+        });
+
+      console.log(
+        `New customer created: ${customer.id}`
+      );
+    }
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | Find or create conversation
+    |--------------------------------------------------------------------------
+    */
+
+    const conversation =
+      await getOrCreateConversation({
+        businessId,
+        customerId:
+          customer.id
+      });
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | Save customer message
+    |--------------------------------------------------------------------------
+    */
+
+    await saveMessage({
+      businessId,
+      conversationId:
+        conversation.id,
+      customerId:
+        customer.id,
+      senderType:
+        "customer",
+      message:
+        customerMessage
+    });
+
+
+    console.log(
+      `Customer message saved: ${conversation.id}`
     );
 
 
     /*
-     * Make sure the agent actually produced a reply.
-     */
+    |--------------------------------------------------------------------------
+    | Run Noor AI Agent
+    |--------------------------------------------------------------------------
+    */
+
+    const agentResult =
+      await runAgent(
+        customerMessage,
+        {
+          customerPhone,
+          businessId,
+          customerId:
+            customer.id,
+          conversationId:
+            conversation.id
+        }
+      );
+
+
     if (
       !agentResult ||
       !agentResult.reply
@@ -158,10 +287,10 @@ export async function handleWebhook(req, res) {
 
 
     /*
-     |--------------------------------------------------------------------------
-     | Send response back to WhatsApp
-     |--------------------------------------------------------------------------
-     */
+    |--------------------------------------------------------------------------
+    | Send AI response to WhatsApp
+    |--------------------------------------------------------------------------
+    */
 
     await sendWhatsAppMessage(
       customerPhone,
@@ -169,8 +298,27 @@ export async function handleWebhook(req, res) {
     );
 
 
+    /*
+    |--------------------------------------------------------------------------
+    | Save AI message
+    |--------------------------------------------------------------------------
+    */
+
+    await saveMessage({
+      businessId,
+      conversationId:
+        conversation.id,
+      customerId:
+        customer.id,
+      senderType:
+        "ai",
+      message:
+        agentResult.reply
+    });
+
+
     console.log(
-      `Noor AI response sent to ${customerPhone}`
+      `Noor AI response sent and saved for ${customerPhone}`
     );
 
 
@@ -182,4 +330,5 @@ export async function handleWebhook(req, res) {
     );
 
   }
+
 }
