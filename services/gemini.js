@@ -4,7 +4,7 @@ import { tools } from "../agent/tools.js";
 
 let client = null;
 
-const MODEL = "gemini-3.6-flash";
+const MODEL = "gemini-3.5-flash-lite";
 const MAX_RETRIES = 3;
 
 /*
