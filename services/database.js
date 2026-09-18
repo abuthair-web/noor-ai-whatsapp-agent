@@ -1,47 +1,57 @@
+import { createClient } from "@supabase/supabase-js";
+
+let supabase = null;
+
+function getSupabase() {
+  if (!process.env.SUPABASE_URL) {
+    throw new Error("SUPABASE_URL is not configured.");
+  }
+
+  if (!process.env.SUPABASE_KEY) {
+    throw new Error("SUPABASE_KEY is not configured.");
+  }
+
+  if (!supabase) {
+    supabase = createClient(
+      process.env.SUPABASE_URL,
+      process.env.SUPABASE_KEY
+    );
+  }
+
+  return supabase;
+}
+
 /*
 |--------------------------------------------------------------------------
-| Database Service
+| Test Supabase connection
 |--------------------------------------------------------------------------
-|
-| Supabase will be connected here.
-|
-| Keeping database operations in their own service prevents the AI agent
-| from directly depending on database implementation details.
-|
 */
 
-export async function createCustomer(data) {
+export async function testDatabaseConnection() {
+  const db = getSupabase();
+
+  const { data, error } = await db
+    .from("businesses")
+    .select("id")
+    .limit(1);
+
+  if (error) {
+    throw new Error(
+      `Supabase connection failed: ${error.message}`
+    );
+  }
+
   return {
-    success: false,
-    status: "not_connected",
-    message: "Database is not connected yet.",
-    data
+    success: true,
+    connected: true,
+    rows_found: data?.length || 0
   };
 }
 
-export async function getCustomer(data) {
-  return {
-    success: false,
-    status: "not_connected",
-    message: "Database is not connected yet.",
-    data
-  };
-}
+/*
+|--------------------------------------------------------------------------
+| Get Supabase client
+|--------------------------------------------------------------------------
+*/
 
-export async function createLead(data) {
-  return {
-    success: false,
-    status: "not_connected",
-    message: "Database is not connected yet.",
-    data
-  };
-}
-
-export async function createBooking(data) {
-  return {
-    success: false,
-    status: "not_connected",
-    message: "Database is not connected yet.",
-    data
-  };
-}
+export { getSupabase };
