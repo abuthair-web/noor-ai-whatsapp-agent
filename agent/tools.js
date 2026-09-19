@@ -1,1016 +1,1023 @@
 import { Type } from "@google/genai";
 import {
- getSupabase,
- getBusinessFromDatabase,
- getCustomerByPhone,
- createCustomerRecord,
- getAvailableRooms,
- getRoom,
- getOverlappingBookings,
- createBookingRecord,
- getBookingById,
- getCustomerBookings,
- updateBooking,
- getOrCreateConversation,
- saveMessage,
- createLeadRecord,
- createPaymentRecord,
- getPaymentByBooking
+  getSupabase,
+  getBusinessFromDatabase,
+  getCustomerByPhone,
+  createCustomerRecord,
+  getAvailableRooms,
+  getRoom,
+  getOverlappingBookings,
+  createBookingRecord,
+  getBookingById,
+  getCustomerBookings,
+  updateBooking,
+  getOrCreateConversation,
+  saveMessage,
+  createLeadRecord,
+  createPaymentRecord,
+  getPaymentByBooking
 } from "../services/database.js";
+
 import {
- createRazorpayPaymentLink
+  createRazorpayPaymentLink
 } from "../services/razorpay.js";
+
 /*
-|--------------------------------------------------------------------------
-| CONFIGURATION
-|--------------------------------------------------------------------------
-*/
-function getBusinessId(context = {}) {
- return (
- context.businessId ||
- process.env.BUSINESS_ID ||
- "demo-business"
- );
+ * Noor AI WhatsApp Agent
+ *
+ * Tool definitions and tool execution layer.
+ *
+ * Important:
+ * - Customer identity comes from WhatsApp context.
+ * - Booking/payment actions are performed server-side.
+ * - Razorpay Payment Links are used for customer payments.
+ */
+
+function getBusinessId() {
+  return (
+    process.env.BUSINESS_ID ||
+    "demo-business"
+  );
 }
-/*
-|--------------------------------------------------------------------------
-| PHONE NORMALIZATION
-|--------------------------------------------------------------------------
-|
-| Keeps WhatsApp/customer phone numbers consistent.
-|
-| Examples:
-| 9447722883 -> 919447722883
-| +91 9447722883 -> 919447722883
-| 919447722883 -> 919447722883
-|
-|--------------------------------------------------------------------------
-*/
+
+function getCustomerPhone(context = {}) {
+  return (
+    context.customerPhone ||
+    context.phoneNumber ||
+    null
+  );
+}
+
 function normalizePhone(phone) {
- if (!phone) {
- return null;
- }
- let value = String(phone).trim();
- value = value.replace(/\D/g, "");
- if (value.startsWith("00")) {
- value = value.substring(2);
- }
- if (value.length === 10) {
- value = `91${value}`;
- }
- if (
- value.length === 11 &&
- value.startsWith("0")
- ) {
- value = `91${value.substring(1)}`;
- }
- return value || null;
+  if (!phone) {
+    return null;
+  }
+
+  return String(phone)
+    .replace(/\D/g, "")
+    .slice(-10);
 }
-/*
-|--------------------------------------------------------------------------
-| DATE VALIDATION
-|--------------------------------------------------------------------------
-*/
-function isValidDateString(value) {
- if (
- typeof value !== "string" ||
- !/^\d{4}-\d{2}-\d{2}$/.test(value)
- ) {
- return false;
- }
- const date = new Date(`${value}T00:00:00Z`);
- if (Number.isNaN(date.getTime())) {
- return false;
- }
- return (
- date.toISOString().slice(0, 10) === value
- );
+
+function requireCustomerPhone(context = {}) {
+  const phone =
+    getCustomerPhone(context);
+
+  if (!phone) {
+    throw new Error(
+      "Customer WhatsApp phone number is required."
+    );
+  }
+
+  return phone;
 }
-function calculateNights(checkIn, checkOut) {
- const start = new Date(`${checkIn}T00:00:00Z`);
- const end = new Date(`${checkOut}T00:00:00Z`);
- return Math.round(
- (end - start) /
- (1000 * 60 * 60 * 24)
- );
+
+function toNumber(value) {
+  const number = Number(value);
+
+  if (!Number.isFinite(number)) {
+    return null;
+  }
+
+  return number;
 }
-/*
-|--------------------------------------------------------------------------
-| CUSTOMER RESOLUTION
-|--------------------------------------------------------------------------
-|
-| IMPORTANT:
-|
-| For a live WhatsApp conversation, context.customerId is the
-| most reliable identity because webhook.js already resolved it.
-|
-| Phone number is used as a fallback.
-|
-|--------------------------------------------------------------------------
-*/
-async function resolveCustomer(
- context = {},
- phone = null
+
+function formatDate(value) {
+  if (!value) {
+    return null;
+  }
+
+  return String(value).slice(0, 10);
+}
+
+function validateDateRange(
+  checkIn,
+  checkOut
 ) {
- const businessId =
- getBusinessId(context);
- const db = getSupabase();
- /*
- |--------------------------------------------------------------------------
- | 1. Trusted customer ID from webhook context
- |--------------------------------------------------------------------------
+  if (!checkIn || !checkOut) {
+    throw new Error(
+      "Check-in and check-out dates are required."
+    );
+  }
+
+  const start =
+    new Date(`${checkIn}T00:00:00`);
+
+  const end =
+    new Date(`${checkOut}T00:00:00`);
+
+  if (
+    Number.isNaN(start.getTime()) ||
+    Number.isNaN(end.getTime())
+  ) {
+    throw new Error(
+      "Please provide valid check-in and check-out dates."
+    );
+  }
+
+  if (end <= start) {
+    throw new Error(
+      "Check-out date must be after check-in date."
+    );
+  }
+
+  return {
+    checkIn,
+    checkOut
+  };
+}
+
+function calculateNights(
+  checkIn,
+  checkOut
+) {
+  const start =
+    new Date(`${checkIn}T00:00:00`);
+
+  const end =
+    new Date(`${checkOut}T00:00:00`);
+
+  const milliseconds =
+    end.getTime() - start.getTime();
+
+  return Math.ceil(
+    milliseconds /
+      (1000 * 60 * 60 * 24)
+  );
+}
+
+function getRoomPrice(room) {
+  return toNumber(
+    room?.price ??
+    room?.price_per_night ??
+    room?.pricePerNight ??
+    room?.rate ??
+    0
+  );
+}
+
+function getRoomCapacity(room) {
+  return toNumber(
+    room?.capacity ??
+    room?.max_guests ??
+    room?.maxGuests ??
+    room?.guests ??
+    0
+  );
+}
+
+function getRoomName(room) {
+  return (
+    room?.name ||
+    room?.room_name ||
+    room?.roomType ||
+    room?.room_type ||
+    "Room"
+  );
+}
+
+function getRoomDescription(room) {
+  return (
+    room?.description ||
+    room?.room_description ||
+    ""
+  );
+}
+
+function getRoomId(room) {
+  return (
+    room?.id ||
+    room?.room_id ||
+    null
+  );
+}
+
+function getBookingId(booking) {
+  return (
+    booking?.id ||
+    booking?.booking_id ||
+    null
+  );
+}
+
+function getBookingStatus(booking) {
+  return (
+    booking?.status ||
+    "unknown"
+  );
+}
+
+function getPaymentStatus(payment) {
+  return (
+    payment?.status ||
+    "unknown"
+  );
+}
+
+function safeString(value) {
+  if (
+    value === undefined ||
+    value === null
+  ) {
+    return "";
+  }
+
+  return String(value);
+}
+
+function buildRoomSummary(room) {
+  const name =
+    getRoomName(room);
+
+  const price =
+    getRoomPrice(room);
+
+  const capacity =
+    getRoomCapacity(room);
+
+  const description =
+    getRoomDescription(room);
+
+  return {
+    id: getRoomId(room),
+    name,
+    price,
+    capacity,
+    description
+  };
+}
+
+/**
+ * Get business information.
  */
- if (context.customerId) {
- const { data, error } =
- await db
- .from("customers")
- .select("*")
- .eq(
- "business_id",
- businessId
- )
- .eq(
- "id",
- context.customerId
- )
- .maybeSingle();
- if (error) {
- throw new Error(
- `Failed to resolve customer: ${error.message}`
- );
- }
- if (data) {
- return data;
- }
- }
- /*
- |--------------------------------------------------------------------------
- | 2. Fallback to phone
- |--------------------------------------------------------------------------
+export async function getBusinessInfo(
+  args = {},
+  context = {}
+) {
+  const businessId =
+    args.businessId ||
+    context.businessId ||
+    getBusinessId();
+
+  const business =
+    await getBusinessFromDatabase(
+      businessId
+    );
+
+  if (!business) {
+    return {
+      success: false,
+      error:
+        "Business information was not found."
+    };
+  }
+
+  return {
+    success: true,
+    business
+  };
+}
+
+/**
+ * Get available rooms.
  */
- const candidatePhone =
- normalizePhone(
- phone ||
- context.customerPhone
- );
- if (!candidatePhone) {
- return null;
- }
- /*
- |--------------------------------------------------------------------------
- | Try normalized phone first
- |--------------------------------------------------------------------------
+export async function getRooms(
+  args = {},
+  context = {}
+) {
+  const businessId =
+    args.businessId ||
+    context.businessId ||
+    getBusinessId();
+
+  const rooms =
+    await getAvailableRooms(
+      businessId
+    );
+
+  return {
+    success: true,
+    rooms: Array.isArray(rooms)
+      ? rooms.map(buildRoomSummary)
+      : []
+  };
+}
+
+/**
+ * Search room availability.
  */
- const customer =
- await getCustomerByPhone(
- businessId,
- candidatePhone
- );
- if (customer) {
- return customer;
- }
- /*
- |--------------------------------------------------------------------------
- | Fallback to original phone if normalization changed it
- |--------------------------------------------------------------------------
+export async function searchAvailability(
+  args = {},
+  context = {}
+) {
+  const businessId =
+    args.businessId ||
+    context.businessId ||
+    getBusinessId();
+
+  const checkIn =
+    formatDate(
+      args.checkIn ||
+      args.check_in
+    );
+
+  const checkOut =
+    formatDate(
+      args.checkOut ||
+      args.check_out
+    );
+
+  const guests =
+    toNumber(
+      args.guests ??
+      args.numberOfGuests ??
+      args.number_of_guests ??
+      1
+    ) || 1;
+
+  validateDateRange(
+    checkIn,
+    checkOut
+  );
+
+  const rooms =
+    await getAvailableRooms(
+      businessId
+    );
+
+  const available = [];
+
+  for (const room of rooms || []) {
+    const capacity =
+      getRoomCapacity(room);
+
+    if (
+      capacity > 0 &&
+      capacity < guests
+    ) {
+      continue;
+    }
+
+    const roomId =
+      getRoomId(room);
+
+    if (!roomId) {
+      continue;
+    }
+
+    const overlaps =
+      await getOverlappingBookings(
+        roomId,
+        checkIn,
+        checkOut
+      );
+
+    if (
+      Array.isArray(overlaps) &&
+      overlaps.length > 0
+    ) {
+      continue;
+    }
+
+    available.push(
+      buildRoomSummary(room)
+    );
+  }
+
+  return {
+    success: true,
+    business_id: businessId,
+    check_in: checkIn,
+    check_out: checkOut,
+    guests,
+    nights:
+      calculateNights(
+        checkIn,
+        checkOut
+      ),
+    rooms: available
+  };
+}
+
+/**
+ * Create a hotel booking and a Razorpay Payment Link.
  */
- const originalPhone =
- phone ||
- context.customerPhone;
- if (
- originalPhone &&
- String(originalPhone) !== candidatePhone
- ) {
- return await getCustomerByPhone(
- businessId,
- String(originalPhone)
- );
- }
- return null;
+export async function createBooking(
+  args = {},
+  context = {}
+) {
+  const businessId =
+    args.businessId ||
+    context.businessId ||
+    getBusinessId();
+
+  const customerPhone =
+    requireCustomerPhone(
+      context
+    );
+
+  const customerName =
+    safeString(
+      args.customerName ||
+      args.customer_name ||
+      context.customerName ||
+      "WhatsApp Customer"
+    ).trim();
+
+  const roomId =
+    args.roomId ||
+    args.room_id;
+
+  const checkIn =
+    formatDate(
+      args.checkIn ||
+      args.check_in
+    );
+
+  const checkOut =
+    formatDate(
+      args.checkOut ||
+      args.check_out
+    );
+
+  const guests =
+    toNumber(
+      args.guests ??
+      args.numberOfGuests ??
+      args.number_of_guests ??
+      1
+    ) || 1;
+
+  if (!roomId) {
+    throw new Error(
+      "Room selection is required before creating a booking."
+    );
+  }
+
+  if (!customerName) {
+    throw new Error(
+      "Customer full name is required before creating a booking."
+    );
+  }
+
+  validateDateRange(
+    checkIn,
+    checkOut
+  );
+
+  const room =
+    await getRoom(roomId);
+
+  if (!room) {
+    throw new Error(
+      "The selected room could not be found."
+    );
+  }
+
+  const capacity =
+    getRoomCapacity(room);
+
+  if (
+    capacity > 0 &&
+    guests > capacity
+  ) {
+    throw new Error(
+      `This room can accommodate a maximum of ${capacity} guest(s).`
+    );
+  }
+
+  const overlapping =
+    await getOverlappingBookings(
+      roomId,
+      checkIn,
+      checkOut
+    );
+
+  if (
+    Array.isArray(overlapping) &&
+    overlapping.length > 0
+  ) {
+    throw new Error(
+      "The selected room is not available for those dates."
+    );
+  }
+
+  const nights =
+    calculateNights(
+      checkIn,
+      checkOut
+    );
+
+  const pricePerNight =
+    getRoomPrice(room);
+
+  if (
+    !pricePerNight ||
+    pricePerNight <= 0
+  ) {
+    throw new Error(
+      "The selected room does not have a valid price."
+    );
+  }
+
+  const totalAmount =
+    pricePerNight * nights;
+
+  const customer =
+    await getCustomerByPhone(
+      customerPhone,
+      businessId
+    );
+
+  let customerId =
+    customer?.id || null;
+
+  if (!customerId) {
+    const createdCustomer =
+      await createCustomerRecord({
+        businessId,
+        phone: customerPhone,
+        name: customerName
+      });
+
+    customerId =
+      createdCustomer?.id ||
+      null;
+  }
+
+  const booking =
+    await createBookingRecord({
+      businessId,
+      customerId,
+      customerPhone,
+      customerName,
+      roomId,
+      checkIn,
+      checkOut,
+      guests,
+      nights,
+      pricePerNight,
+      totalAmount,
+      status: "pending"
+    });
+
+  const bookingId =
+    getBookingId(booking);
+
+  if (!bookingId) {
+    throw new Error(
+      "Booking was created but no booking ID was returned."
+    );
+  }
+
+  const razorpayPaymentLink =
+    await createRazorpayPaymentLink({
+      bookingId,
+      amount: totalAmount,
+      currency: "INR",
+      customerName,
+      customerPhone
+    });
+
+  const payment =
+    await createPaymentRecord({
+      businessId,
+      bookingId,
+      customerId,
+      amount: totalAmount,
+      currency: "INR",
+      provider: "razorpay",
+      status: "pending",
+      providerPaymentId: null,
+      razorpayOrderId: null,
+      razorpayPaymentLinkId:
+        razorpayPaymentLink.payment_link_id,
+      razorpaySignature: null
+    });
+
+  return {
+    success: true,
+
+    booking: {
+      id: bookingId,
+      customer_name: customerName,
+      customer_phone: customerPhone,
+      room_id: roomId,
+      room_name:
+        getRoomName(room),
+      check_in: checkIn,
+      check_out: checkOut,
+      guests,
+      nights,
+      price_per_night:
+        pricePerNight,
+      total_amount:
+        totalAmount,
+      currency: "INR",
+      status:
+        booking?.status ||
+        "pending"
+    },
+
+    payment: {
+      id: payment?.id || null,
+      provider: "razorpay",
+      razorpay_payment_link_id:
+        razorpayPaymentLink.payment_link_id,
+      payment_url:
+        razorpayPaymentLink.short_url,
+      amount:
+        razorpayPaymentLink.amount,
+      currency:
+        razorpayPaymentLink.currency,
+      status: "pending"
+    },
+
+    message:
+      "Booking created successfully. Please complete the payment using the payment link."
+  };
+}
+
+/**
+ * Get a booking by ID.
+ */
+export async function getBooking(
+  args = {},
+  context = {}
+) {
+  const customerPhone =
+    requireCustomerPhone(
+      context
+    );
+
+  const bookingId =
+    args.bookingId ||
+    args.booking_id;
+
+  if (!bookingId) {
+    throw new Error(
+      "Booking ID is required."
+    );
+  }
+
+  const booking =
+    await getBookingById(
+      bookingId
+    );
+
+  if (!booking) {
+    return {
+      success: false,
+      error:
+        "Booking not found."
+    };
+  }
+
+  const bookingPhone =
+    normalizePhone(
+      booking.customer_phone ||
+      booking.customerPhone ||
+      ""
+    );
+
+  if (
+    bookingPhone &&
+    bookingPhone !==
+      normalizePhone(
+        customerPhone
+      )
+  ) {
+    return {
+      success: false,
+      error:
+        "This booking does not belong to the current WhatsApp customer."
+    };
+  }
+
+  return {
+    success: true,
+    booking
+  };
+}
+
+/**
+ * Get the current customer's bookings.
+ */
+export async function getCustomerBookingsTool(
+  args = {},
+  context = {}
+) {
+  const customerPhone =
+    requireCustomerPhone(
+      context
+    );
+
+  const businessId =
+    args.businessId ||
+    context.businessId ||
+    getBusinessId();
+
+  const bookings =
+    await getCustomerBookings(
+      customerPhone,
+      businessId
+    );
+
+  return {
+    success: true,
+    customer_phone:
+      customerPhone,
+    bookings:
+      Array.isArray(bookings)
+        ? bookings
+        : []
+  };
+}
+
+/**
+ * Modify an existing booking.
+ */
+export async function modifyBooking(
+  args = {},
+  context = {}
+) {
+  const customerPhone =
+    requireCustomerPhone(
+      context
+    );
+
+  const bookingId =
+    args.bookingId ||
+    args.booking_id;
+
+  if (!bookingId) {
+    throw new Error(
+      "Booking ID is required."
+    );
+  }
+
+  const booking =
+    await getBookingById(
+      bookingId
+    );
+
+  if (!booking) {
+    throw new Error(
+      "Booking not found."
+    );
+  }
+
+  const bookingPhone =
+    normalizePhone(
+      booking.customer_phone ||
+      booking.customerPhone ||
+      ""
+    );
+
+  if (
+    bookingPhone &&
+    bookingPhone !==
+      normalizePhone(
+        customerPhone
+      )
+  ) {
+    throw new Error(
+      "This booking does not belong to the current WhatsApp customer."
+    );
+  }
+
+  const updates = {};
+
+  if (
+    args.checkIn ||
+    args.check_in
+  ) {
+    updates.check_in =
+      formatDate(
+        args.checkIn ||
+        args.check_in
+      );
+  }
+
+  if (
+    args.checkOut ||
+    args.check_out
+  ) {
+    updates.check_out =
+      formatDate(
+        args.checkOut ||
+        args.check_out
+      );
+  }
+
+  if (
+    args.guests !== undefined ||
+    args.numberOfGuests !== undefined ||
+    args.number_of_guests !== undefined
+  ) {
+    updates.guests =
+      toNumber(
+        args.guests ??
+        args.numberOfGuests ??
+        args.number_of_guests
+      );
+  }
+
+  if (args.roomId || args.room_id) {
+    updates.room_id =
+      args.roomId ||
+      args.room_id;
+  }
+
+  if (
+    updates.check_in ||
+    updates.check_out
+  ) {
+    const newCheckIn =
+      updates.check_in ||
+      formatDate(
+        booking.check_in
+      );
+
+    const newCheckOut =
+      updates.check_out ||
+      formatDate(
+        booking.check_out
+      );
+
+    validateDateRange(
+      newCheckIn,
+      newCheckOut
+    );
+
+    const roomId =
+      updates.room_id ||
+      booking.room_id;
+
+    const overlaps =
+      await getOverlappingBookings(
+        roomId,
+        newCheckIn,
+        newCheckOut,
+        bookingId
+      );
+
+    if (
+      Array.isArray(overlaps) &&
+      overlaps.length > 0
+    ) {
+      throw new Error(
+        "The selected room is not available for the new dates."
+      );
+    }
+  }
+
+  if (
+    updates.room_id &&
+    updates.guests
+  ) {
+    const room =
+      await getRoom(
+        updates.room_id
+      );
+
+    if (!room) {
+      throw new Error(
+        "The selected room was not found."
+      );
+    }
+
+    const capacity =
+      getRoomCapacity(room);
+
+    if (
+      capacity > 0 &&
+      updates.guests > capacity
+    ) {
+      throw new Error(
+        `This room can accommodate a maximum of ${capacity} guest(s).`
+      );
+    }
+  }
+
+  if (
+    Object.keys(updates)
+      .length === 0
+  ) {
+    return {
+      success: false,
+      error:
+        "No booking changes were provided."
+    };
+  }
+
+  const updated =
+    await updateBooking(
+      bookingId,
+      updates
+    );
+
+  return {
+    success: true,
+    booking: updated
+  };
+}
+
+/**
+ * Get payment status for a booking.
+ */
+export async function getPaymentStatus(
+  args = {},
+  context = {}
+) {
+  const customerPhone =
+    requireCustomerPhone(
+      context
+    );
+
+  const bookingId =
+    args.bookingId ||
+    args.booking_id;
+
+  if (!bookingId) {
+    throw new Error(
+      "Booking ID is required."
+    );
+  }
+
+  const booking =
+    await getBookingById(
+      bookingId
+    );
+
+  if (!booking) {
+    return {
+      success: false,
+      error:
+        "Booking not found."
+    };
+  }
+
+  const bookingPhone =
+    normalizePhone(
+      booking.customer_phone ||
+      booking.customerPhone ||
+      ""
+    );
+
+  if (
+    bookingPhone &&
+    bookingPhone !==
+      normalizePhone(
+        customerPhone
+      )
+  ) {
+    return {
+      success: false,
+      error:
+        "This booking does not belong to the current WhatsApp customer."
+    };
+  }
+
+  const payment =
+    await getPaymentByBooking(
+      bookingId
+    );
+
+  if (!payment) {
+    return {
+      success: true,
+      booking_id: bookingId,
+      payment: null,
+      status: "not_found"
+    };
+  }
+
+  return {
+    success: true,
+    booking_id: bookingId,
+    payment: {
+      id: payment.id,
+      status:
+        getPaymentStatus(
+          payment
+        ),
+      amount:
+        payment.amount,
+      currency:
+        payment.currency,
+      provider:
+        payment.provider,
+      razorpay_payment_link_id:
+        payment.razorpay_payment_link_id ||
+        null
+    }
+  };
 }
 /*
 |--------------------------------------------------------------------------
-| BOOKING OWNERSHIP
-|--------------------------------------------------------------------------
-|
-| Customer-facing tools must not allow a customer to access or modify
-| another customer's booking just by knowing a UUID.
-|
+| Verify room
 |--------------------------------------------------------------------------
 */
-async function getOwnedBooking(
- bookingId,
- context = {}
-) {
- const businessId =
- getBusinessId(context);
- const booking =
- await getBookingById(
- businessId,
- bookingId
- );
- if (!booking) {
- return {
- success: false,
- found: false,
- message: "Booking not found."
- };
- }
- const customer =
- await resolveCustomer(context);
- if (!customer) {
- return {
- success: false,
- found: false,
- message:
- "The current WhatsApp customer could not be verified."
- };
- }
- if (
- booking.customer_id !==
- customer.id
- ) {
- return {
- success: false,
- found: false,
- message:
- "This booking does not belong to the current customer."
- };
- }
- return {
- success: true,
- booking,
- customer
- };
-}
-/*
-|--------------------------------------------------------------------------
-| TOOL REGISTRY
-|--------------------------------------------------------------------------
-*/
-export const tools = {
- /*
- |--------------------------------------------------------------------------
- | BUSINESS
- |--------------------------------------------------------------------------
- */
- get_business_info: {
- description:
- "Get complete information about the business, including name, type, description, phone, email and address.",
- parameters: {
- type: Type.OBJECT,
- properties: {}
- },
- execute: get_business_info
- },
- search_knowledge: {
- description:
- "Search the business information to answer customer questions about the business.",
- parameters: {
- type: Type.OBJECT,
- properties: {
- query: {
- type: Type.STRING,
- description:
- "The information the customer is asking about."
- }
- },
- required: ["query"]
- },
- execute: search_knowledge
- },
- /*
- |--------------------------------------------------------------------------
- | ROOM CATALOG
- |--------------------------------------------------------------------------
- */
- get_rooms: {
- description:
- "Get the hotel's room types, prices, capacities and descriptions. Use this when the customer asks what rooms the hotel has or asks
-about room types, prices or capacity.",
- parameters: {
- type: Type.OBJECT,
- properties: {}
- },
- execute: get_rooms
- },
- /*
- |--------------------------------------------------------------------------
- | ROOM AVAILABILITY
- |--------------------------------------------------------------------------
- */
- search_availability: {
- description:
- "Check real room availability for specific check-in and check-out dates and number of guests. Always use this before telling the
-customer a room is available.",
- parameters: {
- type: Type.OBJECT,
- properties: {
- check_in: {
- type: Type.STRING,
- description:
- "Check-in date in YYYY-MM-DD format."
- },
- check_out: {
- type: Type.STRING,
- description:
- "Check-out date in YYYY-MM-DD format."
- },
- guests: {
- type: Type.NUMBER,
- description:
- "Number of guests."
- }
- },
- required: [
- "check_in",
- "check_out",
- "guests"
- ]
- },
- execute: search_availability
- },
- /*
- |--------------------------------------------------------------------------
- | CUSTOMERS
- |--------------------------------------------------------------------------
- */
- get_customer: {
- description:
- "Find the current WhatsApp customer. Prefer the customer identity from the conversation context. A phone number is optional.",
- parameters: {
- type: Type.OBJECT,
- properties: {
- phone: {
- type: Type.STRING,
- description:
- "Optional customer WhatsApp phone number. Use only if needed."
- }
- }
- },
- execute: get_customer
- },
- create_customer: {
- description:
- "Create or update a customer record after customer information has been collected.",
- parameters: {
- type: Type.OBJECT,
- properties: {
- name: {
- type: Type.STRING,
- description:
- "Customer full name."
- },
- phone: {
- type: Type.STRING,
- description:
- "Customer WhatsApp phone number. If omitted, use the current WhatsApp customer."
- },
- email: {
- type: Type.STRING,
- description:
- "Customer email address, if available."
- }
- },
- required: ["name"]
- },
- execute: create_customer
- },
- /*
- |--------------------------------------------------------------------------
- | BOOKINGS
- |--------------------------------------------------------------------------
- */
- create_booking: {
- description:
- "Create a hotel booking only after the customer has selected a room and provided their full name, check-in date, check-out date and
-number of guests.",
- parameters: {
- type: Type.OBJECT,
- properties: {
- customer_name: {
- type: Type.STRING,
- description:
- "Customer full name."
- },
- customer_phone: {
- type: Type.STRING,
- description:
- "Optional customer WhatsApp phone number. Prefer the current WhatsApp customer context."
- },
- room_id: {
- type: Type.STRING,
- description:
- "Selected room ID."
- },
- check_in: {
- type: Type.STRING,
- description:
- "Check-in date in YYYY-MM-DD format."
- },
- check_out: {
- type: Type.STRING,
- description:
- "Check-out date in YYYY-MM-DD format."
- },
- guests: {
- type: Type.NUMBER,
- description:
- "Number of guests."
- }
- },
- required: [
- "customer_name",
- "room_id",
- "check_in",
- "check_out",
- "guests"
- ]
- },
- execute: create_booking
- },
- get_booking: {
- description:
- "Get the details and current status of the current customer's booking using its booking ID. The booking must belong to the current
-WhatsApp customer.",
- parameters: {
- type: Type.OBJECT,
- properties: {
- booking_id: {
- type: Type.STRING,
- description:
- "Booking UUID."
- }
- },
- required: ["booking_id"]
- },
- execute: get_booking
- },
- get_customer_bookings: {
- description:
- "Get the current WhatsApp customer's previous and current hotel bookings. Prefer the current customer identity from conversation
-context.",
- parameters: {
- type: Type.OBJECT,
- properties: {
- phone: {
- type: Type.STRING,
- description:
- "Optional customer WhatsApp phone number. Usually not needed because the current customer is already known."
- }
- }
- },
- execute: get_customer_bookings
- },
- cancel_booking: {
- description:
- "Cancel an existing booking belonging to the current WhatsApp customer. Only cancel when the customer clearly requests cancellation.",
- parameters: {
- type: Type.OBJECT,
- properties: {
- booking_id: {
- type: Type.STRING,
- description:
- "Booking UUID."
- },
- reason: {
- type: Type.STRING,
- description:
- "Reason for cancellation, if provided."
- }
- },
- required: ["booking_id"]
- },
- execute: cancel_booking
- },
- modify_booking: {
- description:
- "Modify the current customer's existing booking. Use this when the customer requests changes to dates, room or guest count. Check
-availability before confirming changes.",
- parameters: {
- type: Type.OBJECT,
- properties: {
- booking_id: {
- type: Type.STRING,
- description:
- "Booking UUID."
- },
- check_in: {
- type: Type.STRING,
- description:
- "New check-in date in YYYY-MM-DD format."
- },
- check_out: {
- type: Type.STRING,
- description:
- "New check-out date in YYYY-MM-DD format."
- },
- room_id: {
- type: Type.STRING,
- description:
- "New room ID."
- },
- guests: {
- type: Type.NUMBER,
- description:
- "New number of guests."
- }
- },
- required: ["booking_id"]
- },
- execute: modify_booking
- },
- /*
- |--------------------------------------------------------------------------
- | LEADS
- |--------------------------------------------------------------------------
- */
- create_lead: {
- description:
- "Create a business lead when a customer shows meaningful buying intent, requests follow-up or makes a sales enquiry.",
- parameters: {
- type: Type.OBJECT,
- properties: {
- phone: {
- type: Type.STRING,
- description:
- "Optional customer WhatsApp phone number."
- },
- notes: {
- type: Type.STRING,
- description:
- "Short description of the customer's enquiry."
- },
- status: {
- type: Type.STRING,
- description:
- "Lead status such as new, contacted or qualified."
- }
- },
- required: ["notes"]
- },
- execute: create_lead
- },
- /*
- |--------------------------------------------------------------------------
- | CONVERSATIONS / MESSAGES
- |--------------------------------------------------------------------------
- */
- get_conversation: {
- description:
- "Get or create the current customer's WhatsApp conversation.",
- parameters: {
- type: Type.OBJECT,
- properties: {
- phone: {
- type: Type.STRING,
- description:
- "Optional customer WhatsApp phone number."
- }
- }
- },
- execute: get_conversation
- },
- save_message: {
- description:
- "Save a customer, AI or staff message into the current WhatsApp conversation.",
- parameters: {
- type: Type.OBJECT,
- properties: {
- phone: {
- type: Type.STRING,
- description:
- "Optional customer WhatsApp phone number."
- },
- sender_type: {
- type: Type.STRING,
- description:
- "Message sender type: customer, ai or staff."
- },
- message: {
- type: Type.STRING,
- description:
- "Message text."
- }
- },
- required: [
- "sender_type",
- "message"
- ]
- },
- execute: save_message
- },
- /*
- |--------------------------------------------------------------------------
- | PAYMENTS
- |--------------------------------------------------------------------------
- */
- create_payment_record: {
- description:
- "Create a manual pending payment record only when no payment record exists for the booking. Do not call this immediately after
-create_booking.",
- parameters: {
- type: Type.OBJECT,
- properties: {
- booking_id: {
- type: Type.STRING,
- description:
- "Booking UUID."
- },
- customer_phone: {
- type: Type.STRING,
- description:
- "Optional customer WhatsApp phone number."
- },
- amount: {
- type: Type.NUMBER,
- description:
- "Payment amount."
- },
- provider: {
- type: Type.STRING,
- description:
- "Payment provider name, if known. Razorpay is used for hotel bookings."
- }
- },
- required: [
- "booking_id",
- "amount"
- ]
- },
- execute: create_payment
- },
- get_payment_status: {
- description:
- "Get the current payment record and payment status for the current customer's booking.",
- parameters: {
- type: Type.OBJECT,
- properties: {
- booking_id: {
- type: Type.STRING,
- description:
- "Booking UUID."
- }
- },
- required: ["booking_id"]
- },
- execute: get_payment_status
- },
- /*
- |--------------------------------------------------------------------------
- | HUMAN HANDOFF
- |--------------------------------------------------------------------------
- */
- transfer_to_human: {
- description:
- "Transfer the conversation to human staff when the customer requests human assistance or the AI cannot safely handle the request.",
- parameters: {
- type: Type.OBJECT,
- properties: {
- reason: {
- type: Type.STRING,
- description:
- "Reason for requesting human assistance."
- }
- },
- required: ["reason"]
- },
- execute: transfer_to_human
- }
-};
-/*
-|--------------------------------------------------------------------------
-| BUSINESS INFORMATION
-|--------------------------------------------------------------------------
-*/
-/*
-|--------------------------------------------------------------------------
-| BUSINESS INFORMATION
-|--------------------------------------------------------------------------
-*/
-async function get_business_info(
- args = {},
- context = {}
-) {
- const businessId =
- getBusinessId(context);
- const business =
- await getBusinessFromDatabase(
- businessId
- );
- return {
- success: true,
- business
- };
-}
-/*
-|--------------------------------------------------------------------------
-| KNOWLEDGE SEARCH
-|--------------------------------------------------------------------------
-*/
-async function search_knowledge(
- { query = "" } = {},
- context = {}
-) {
- const businessId =
- getBusinessId(context);
- const business =
- await getBusinessFromDatabase(
- businessId
- );
- if (!query.trim()) {
- return {
- success: true,
- result: business
- };
- }
- const searchableBusiness =
- JSON.stringify(
- business
- ).toLowerCase();
- const searchQuery =
- query.toLowerCase().trim();
- if (
- searchableBusiness.includes(
- searchQuery
- )
- ) {
- return {
- success: true,
- query,
- result: business
- };
- }
- return {
- success: false,
- query,
- message:
- "No matching business information was found."
- };
-}
-/*
-|--------------------------------------------------------------------------
-| ROOM CATALOG
-|--------------------------------------------------------------------------
-*/
-async function get_rooms(
- args = {},
- context = {}
-) {
- const businessId =
- getBusinessId(context);
- const db =
- getSupabase();
- const { data, error } =
- await db
- .from("rooms")
- .select("*")
- .eq(
- "business_id",
- businessId
- )
- .order(
- "price_per_night",
- {
- ascending: true
- }
- );
- if (error) {
- throw new Error(
- `Failed to load rooms: ${error.message}`
- );
- }
- return {
- success: true,
- rooms: data || []
- };
-}
-/*
-|--------------------------------------------------------------------------
-| ROOM AVAILABILITY
-|--------------------------------------------------------------------------
-*/
-async function search_availability(
- {
- check_in,
- check_out,
- guests = 1
- } = {},
- context = {}
-) {
- const businessId =
- getBusinessId(context);
- const guestCount =
- Number(guests);
- if (!check_in || !check_out) {
- return {
- success: false,
- message:
- "Check-in and check-out dates are required."
- };
- }
- if (
- !isValidDateString(check_in) ||
- !isValidDateString(check_out)
- ) {
- return {
- success: false,
- message:
- "Invalid date format. Use YYYY-MM-DD."
- };
- }
- if (
- new Date(`${check_out}T00:00:00Z`) <=
- new Date(`${check_in}T00:00:00Z`)
- ) {
- return {
- success: false,
- message:
- "Check-out date must be after check-in date."
- };
- }
- if (
- !Number.isInteger(guestCount) ||
- guestCount < 1
- ) {
- return {
- success: false,
- message:
- "Number of guests must be at least 1."
- };
- }
- const rooms =
- await getAvailableRooms({
- businessId,
- guests: guestCount
- });
- const overlappingBookings =
- await getOverlappingBookings({
- businessId,
- checkIn: check_in,
- checkOut: check_out
- });
- const bookedRoomIds =
- new Set(
- overlappingBookings.map(
- booking =>
- booking.room_id
- )
- );
- const availableRooms =
- rooms.filter(
- room =>
- !bookedRoomIds.has(
- room.room_id
- )
- );
- return {
- success: true,
- check_in,
- check_out,
- guests: guestCount,
- available_rooms:
- availableRooms
- };
-}
-/*
-|--------------------------------------------------------------------------
-| CUSTOMER
-|--------------------------------------------------------------------------
-*/
-async function get_customer(
- { phone } = {},
- context = {}
-) {
- const customer =
- await resolveCustomer(
- context,
- phone
- );
- return {
- success: true,
- found: Boolean(customer),
- customer
- };
-}
-/*
-|--------------------------------------------------------------------------
-| CREATE / UPDATE CUSTOMER
-|--------------------------------------------------------------------------
-*/
-async function create_customer(
- {
- name,
- phone,
- email = null
- } = {},
- context = {}
-) {
- const businessId =
- getBusinessId(context);
- const customerPhone =
- normalizePhone(
- phone ||
- context.customerPhone
- );
- if (!name || !customerPhone) {
- return {
- success: false,
- message:
- "Customer name and WhatsApp phone number are required."
- };
- }
- const customer =
- await createCustomerRecord({
- businessId,
- name,
- phone: customerPhone,
- email
- });
- return {
- success: true,
- customer
- };
-}
-/*
-|--------------------------------------------------------------------------
-| CREATE BOOKING
-|--------------------------------------------------------------------------
-*/
-async function create_booking(
- {
- customer_name,
- customer_phone,
- room_id,
- check_in,
- check_out,
- guests
- } = {},
- context = {}
-) {
- const businessId =
- getBusinessId(context);
- const guestCount =
- Number(guests);
- const customerPhone =
- normalizePhone(
- customer_phone ||
- context.customerPhone
- );
- /*
- |--------------------------------------------------------------------------
- | Validate required information
- |--------------------------------------------------------------------------
- */
- if (
- !customer_name ||
- !room_id ||
- !check_in ||
- !check_out ||
- !customerPhone ||
- !guests
- ) {
- return {
- success: false,
- message:
- "Customer name, phone, room, dates and guest count are required."
- };
- }
- if (
- !Number.isInteger(guestCount) ||
- guestCount < 1
- ) {
- return {
- success: false,
- message:
- "Number of guests must be at least 1."
- };
- }
- if (
- !isValidDateString(check_in) ||
- !isValidDateString(check_out)
- ) {
- return {
- success: false,
- message:
- "Invalid booking dates. Use YYYY-MM-DD."
- };
- }
- if (
- new Date(`${check_out}T00:00:00Z`) <=
- new Date(`${check_in}T00:00:00Z`)
- ) {
- return {
- success: false,
- message:
- "Check-out date must be after check-in date."
- };
- }
- /*
- |--------------------------------------------------------------------------
- | Verify room
- |--------------------------------------------------------------------------
- */
  const room =
  await getRoom(
  businessId,
@@ -1042,11 +1049,11 @@ async function create_booking(
  `This room can accommodate up to ${room.capacity} guests.`
  };
  }
- /*
- |--------------------------------------------------------------------------
- | Fresh availability check
- |--------------------------------------------------------------------------
- */
+/*
+|--------------------------------------------------------------------------
+| Fresh availability check
+|--------------------------------------------------------------------------
+*/
  const overlappingBookings =
  await getOverlappingBookings({
  businessId,
@@ -1068,11 +1075,11 @@ async function create_booking(
  "Sorry, that room is not available for the requested dates. Please choose another room or dates."
  };
  }
- /*
- |--------------------------------------------------------------------------
- | Resolve customer
- |--------------------------------------------------------------------------
- */
+/*
+|--------------------------------------------------------------------------
+| Resolve customer
+|--------------------------------------------------------------------------
+*/
  const existingCustomer =
  await resolveCustomer(
  context,
@@ -1105,11 +1112,11 @@ async function create_booking(
  "The customer record could not be created."
  };
  }
- /*
- |--------------------------------------------------------------------------
- | Calculate total
- |--------------------------------------------------------------------------
- */
+/*
+|--------------------------------------------------------------------------
+| Calculate total
+|--------------------------------------------------------------------------
+*/
  const nights =
  calculateNights(
  check_in,
@@ -1128,11 +1135,11 @@ async function create_booking(
  "The booking total could not be calculated."
  };
  }
- /*
- |--------------------------------------------------------------------------
- | Create booking
- |--------------------------------------------------------------------------
- */
+/*
+|--------------------------------------------------------------------------
+| Create booking
+|--------------------------------------------------------------------------
+*/
  const booking =
  await createBookingRecord({
  businessId,
@@ -1155,11 +1162,11 @@ async function create_booking(
  "The booking could not be created."
  };
  }
- /*
- |--------------------------------------------------------------------------
- | Create pending payment record
- |--------------------------------------------------------------------------
- */
+/*
+|--------------------------------------------------------------------------
+| Create pending payment record
+|--------------------------------------------------------------------------
+*/
  let razorpayPaymentLink;
  try {
  razorpayPaymentLink =
@@ -1227,11 +1234,11 @@ async function create_booking(
  "The payment link could not be created."
  };
  }
- /*
- |--------------------------------------------------------------------------
- | Create pending payment record
- |--------------------------------------------------------------------------
- */
+/*
+|--------------------------------------------------------------------------
+| Create pending payment record
+|--------------------------------------------------------------------------
+*/
  let payment;
  try {
  payment =
@@ -1292,11 +1299,11 @@ async function create_booking(
  "The payment record could not be created."
  };
  }
- /*
- |--------------------------------------------------------------------------
- | Booking created, payment pending
- |--------------------------------------------------------------------------
- */
+/*
+|--------------------------------------------------------------------------
+| Booking created, payment pending
+|--------------------------------------------------------------------------
+*/
  return {
  success: true,
  status:
@@ -1390,11 +1397,11 @@ async function get_customer_bookings(
 ) {
  const businessId =
  getBusinessId(context);
- /*
- |--------------------------------------------------------------------------
- | FIRST: use trusted customer ID
- |--------------------------------------------------------------------------
- */
+/*
+|--------------------------------------------------------------------------
+| FIRST: use trusted customer ID
+|--------------------------------------------------------------------------
+*/
  const customer =
  await resolveCustomer(
  context,
@@ -1505,13 +1512,7 @@ async function cancel_booking(
 |--------------------------------------------------------------------------
 | MODIFY BOOKING
 |--------------------------------------------------------------------------
-*/
-async function modify_booking(
- {
- booking_id,
- check_in,
- check_out,
- room_id,
+*/ 
  guests
  } = {},
  context = {}
@@ -1811,8 +1812,7 @@ async function get_conversation(
  return {
  success: true,
  customer_found: false,
- conversation: null
- };
+ conversation: null };
  }
  const conversation =
  await getOrCreateConversation({
