@@ -10,11 +10,13 @@ import {
   testDatabaseConnection
 } from "./services/database.js";
 
+import {
+  verifyRazorpayWebhookSignature
+} from "./services/razorpay.js";
+
 const app = express();
 
 const PORT = process.env.PORT || 8080;
-
-app.use(express.json());
 
 
 // ========================================
@@ -52,6 +54,17 @@ app.get("/status", async (req, res) => {
 
     webhook_configured:
       Boolean(process.env.WHATSAPP_VERIFY_TOKEN),
+
+    razorpay_configured:
+      Boolean(
+        process.env.RAZORPAY_KEY_ID &&
+        process.env.RAZORPAY_KEY_SECRET
+      ),
+
+    razorpay_webhook_configured:
+      Boolean(
+        process.env.RAZORPAY_WEBHOOK_SECRET
+      ),
 
     database: {
       configured: false,
@@ -97,6 +110,170 @@ app.get("/status", async (req, res) => {
 
   res.status(200).json(status);
 });
+
+
+// ========================================
+// RAZORPAY WEBHOOK
+// ========================================
+//
+// IMPORTANT:
+// This route must receive the raw request body
+// so Razorpay's HMAC signature can be verified.
+//
+
+app.post(
+  "/webhook/razorpay",
+  express.raw({
+    type: "application/json"
+  }),
+  async (req, res) => {
+
+    try {
+
+      const signature =
+        req.headers["x-razorpay-signature"];
+
+      if (!signature) {
+
+        console.error(
+          "Razorpay webhook signature missing."
+        );
+
+        return res.status(400).json({
+          success: false,
+          error: "Missing Razorpay webhook signature."
+        });
+      }
+
+
+      const rawBody =
+        req.body.toString("utf8");
+
+
+      const verified =
+        verifyRazorpayWebhookSignature(
+          rawBody,
+          signature
+        );
+
+
+      if (!verified) {
+
+        console.error(
+          "Invalid Razorpay webhook signature."
+        );
+
+        return res.status(400).json({
+          success: false,
+          error: "Invalid webhook signature."
+        });
+      }
+
+
+      const event =
+        JSON.parse(rawBody);
+
+
+      console.log(
+        "Verified Razorpay webhook:",
+        JSON.stringify(event, null, 2)
+      );
+
+
+      const eventName =
+        event.event;
+
+
+      // ========================================
+      // PAYMENT SUCCESS
+      // ========================================
+
+      if (eventName === "order.paid") {
+
+        const paymentEntity =
+          event.payload?.payment?.entity;
+
+        const orderEntity =
+          event.payload?.order?.entity;
+
+
+        const paymentId =
+          paymentEntity?.id || null;
+
+        const orderId =
+          paymentEntity?.order_id ||
+          orderEntity?.id ||
+          null;
+
+
+        console.log(
+          "Razorpay order.paid received:",
+          {
+            paymentId,
+            orderId
+          }
+        );
+
+        // Database payment-status update
+        // will be connected in the next step.
+      }
+
+
+      // ========================================
+      // PAYMENT FAILED
+      // ========================================
+
+      if (eventName === "payment.failed") {
+
+        const paymentEntity =
+          event.payload?.payment?.entity;
+
+        console.log(
+          "Razorpay payment.failed received:",
+          {
+            paymentId:
+              paymentEntity?.id || null,
+
+            orderId:
+              paymentEntity?.order_id || null
+          }
+        );
+
+        // Database payment-status update
+        // will be connected in the next step.
+      }
+
+
+      // ========================================
+      // ACKNOWLEDGE WEBHOOK
+      // ========================================
+
+      return res.status(200).json({
+        success: true,
+        received: true
+      });
+
+    } catch (error) {
+
+      console.error(
+        "Razorpay webhook error:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        error: "Webhook processing failed."
+      });
+    }
+  }
+);
+
+
+// ========================================
+// JSON BODY PARSER
+// ========================================
+
+app.use(express.json());
 
 
 // ========================================
