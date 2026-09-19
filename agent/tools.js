@@ -1643,11 +1643,13 @@ async function create_booking(
         provider:
           "razorpay",
         providerPaymentId:
-          null,
-        razorpayOrderId:
-          null,
-        razorpaySignature:
-          null,
+        null,
+     razorpayOrderId:
+     null,
+    razorpayPaymentLinkId:
+   razorpayPaymentLink.payment_link_id,
+   razorpaySignature:
+  null,
         amount:
           totalAmount,
         currency:
