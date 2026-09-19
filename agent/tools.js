@@ -20,9 +20,9 @@ import {
 } from "../services/database.js";
 
 import {
-  createRazorpayOrder
+  createRazorpayOrder,
+  createRazorpayPaymentLink
 } from "../services/razorpay.js";
-
 
 /*
 |--------------------------------------------------------------------------
