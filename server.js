@@ -7,7 +7,10 @@ import {
 } from "./routes/webhook.js";
 
 import {
-  testDatabaseConnection
+  testDatabaseConnection,
+  getPaymentByOrderId,
+  updatePaymentByOrderId,
+  updateBooking
 } from "./services/database.js";
 
 import {
@@ -190,59 +193,185 @@ app.post(
 
       if (eventName === "order.paid") {
 
-        const paymentEntity =
-          event.payload?.payment?.entity;
+  const paymentEntity =
+    event.payload?.payment?.entity;
 
-        const orderEntity =
-          event.payload?.order?.entity;
+  const orderEntity =
+    event.payload?.order?.entity;
 
+  const paymentId =
+    paymentEntity?.id || null;
 
-        const paymentId =
-          paymentEntity?.id || null;
+  const orderId =
+    paymentEntity?.order_id ||
+    orderEntity?.id ||
+    null;
 
-        const orderId =
-          paymentEntity?.order_id ||
-          orderEntity?.id ||
-          null;
+  console.log(
+    "Razorpay order.paid received:",
+    {
+      paymentId,
+      orderId
+    }
+  );
 
+  if (!orderId) {
+    console.error(
+      "Razorpay order.paid event has no order ID."
+    );
 
-        console.log(
-          "Razorpay order.paid received:",
-          {
-            paymentId,
-            orderId
-          }
-        );
+    return res.status(400).json({
+      success: false,
+      error: "Payment order ID missing."
+    });
+  }
 
-        // Database payment-status update
-        // will be connected in the next step.
+  const payment =
+    await getPaymentByOrderId(orderId);
+
+  if (!payment) {
+    console.error(
+      `No payment record found for Razorpay order ${orderId}`
+    );
+
+    return res.status(404).json({
+      success: false,
+      error: "Payment record not found."
+    });
+  }
+
+  /*
+   * Idempotency:
+   * If Razorpay sends the same webhook again,
+   * don't process the payment twice.
+   */
+  if (payment.status === "paid") {
+
+    console.log(
+      `Payment ${orderId} is already marked as paid.`
+    );
+
+    return res.status(200).json({
+      success: true,
+      received: true,
+      already_processed: true
+    });
+  }
+
+  const updatedPayment =
+    await updatePaymentByOrderId(
+      orderId,
+      {
+        status: "paid",
+        provider_payment_id: paymentId,
+        razorpay_payment_id: paymentId,
+        razorpay_signature:
+          signature
       }
+    );
 
+  console.log(
+    "Payment marked as paid:",
+    updatedPayment.id
+  );
+
+  if (payment.booking_id) {
+
+    const updatedBooking =
+      await updateBooking(
+        payment.business_id,
+        payment.booking_id,
+        {
+          status: "confirmed",
+          payment_status: "paid"
+        }
+      );
+
+    console.log(
+      "Booking confirmed:",
+      updatedBooking.id
+    );
+  }
+
+  console.log(
+    `Payment successfully processed for order ${orderId}`
+  );
+}
 
       // ========================================
       // PAYMENT FAILED
       // ========================================
 
-      if (eventName === "payment.failed") {
+     if (eventName === "payment.failed") {
 
-        const paymentEntity =
-          event.payload?.payment?.entity;
+  const paymentEntity =
+    event.payload?.payment?.entity;
 
-        console.log(
-          "Razorpay payment.failed received:",
-          {
-            paymentId:
-              paymentEntity?.id || null,
+  const paymentId =
+    paymentEntity?.id || null;
 
-            orderId:
-              paymentEntity?.order_id || null
-          }
-        );
+  const orderId =
+    paymentEntity?.order_id || null;
 
-        // Database payment-status update
-        // will be connected in the next step.
-      }
+  console.log(
+    "Razorpay payment.failed received:",
+    {
+      paymentId,
+      orderId
+    }
+  );
 
+  if (!orderId) {
+    console.error(
+      "Payment failure event has no order ID."
+    );
+
+    return res.status(400).json({
+      success: false,
+      error: "Payment order ID missing."
+    });
+  }
+
+  const payment =
+    await getPaymentByOrderId(orderId);
+
+  if (!payment) {
+    console.error(
+      `No payment record found for failed order ${orderId}`
+    );
+
+    return res.status(404).json({
+      success: false,
+      error: "Payment record not found."
+    });
+  }
+
+  if (payment.status === "paid") {
+
+    console.log(
+      `Payment ${orderId} is already paid. Ignoring failure event.`
+    );
+
+    return res.status(200).json({
+      success: true,
+      received: true,
+      already_paid: true
+    });
+  }
+
+  await updatePaymentByOrderId(
+    orderId,
+    {
+      status: "failed",
+      provider_payment_id: paymentId,
+      razorpay_payment_id: paymentId
+    }
+  );
+
+  console.log(
+    `Payment marked as failed for order ${orderId}`
+  );
+}
 
       // ========================================
       // ACKNOWLEDGE WEBHOOK
