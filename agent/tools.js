@@ -1551,6 +1551,85 @@ async function create_booking(
   |--------------------------------------------------------------------------
   */
 
+  let razorpayPaymentLink;
+
+  try {
+    razorpayPaymentLink =
+      await createRazorpayPaymentLink({
+        bookingId:
+          booking.id,
+        amount:
+          totalAmount,
+        currency:
+          room.currency ||
+          "INR",
+        customerName:
+          customer_name,
+        customerPhone:
+          customerPhone
+      });
+  } catch (error) {
+    console.error(
+      "Razorpay payment link creation failed:",
+      error
+    );
+
+    try {
+      await updateBooking(
+        businessId,
+        booking.id,
+        {
+          status:
+            "cancelled"
+        }
+      );
+    } catch (rollbackError) {
+      console.error(
+        "Booking rollback failed:",
+        rollbackError
+      );
+    }
+
+    return {
+      success: false,
+      message:
+        "The booking could not be prepared for payment. Please try again."
+    };
+  }
+
+  if (
+    !razorpayPaymentLink?.success ||
+    !razorpayPaymentLink?.short_url
+  ) {
+    try {
+      await updateBooking(
+        businessId,
+        booking.id,
+        {
+          status:
+            "cancelled"
+        }
+      );
+    } catch (rollbackError) {
+      console.error(
+        "Booking rollback failed:",
+        rollbackError
+      );
+    }
+
+    return {
+      success: false,
+      message:
+        "The payment link could not be created."
+    };
+  }
+
+  /*
+  |--------------------------------------------------------------------------
+  | Create pending payment record
+  |--------------------------------------------------------------------------
+  */
+
   let payment;
 
   try {
@@ -1566,7 +1645,7 @@ async function create_booking(
         providerPaymentId:
           null,
         razorpayOrderId:
-          razorpayOrder.order_id,
+          null,
         razorpaySignature:
           null,
         amount:
