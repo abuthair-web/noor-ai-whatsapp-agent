@@ -18,24 +18,7 @@ import {
   createPaymentRecord,
   getPaymentByBooking
 } from "../services/database.js";
-import {
-  getSupabase,
-  getBusinessFromDatabase,
-  getCustomerByPhone,
-  createCustomerRecord,
-  getAvailableRooms,
-  getRoom,
-  getOverlappingBookings,
-  createBookingRecord,
-  getBookingById,
-  getCustomerBookings,
-  updateBooking,
-  getOrCreateConversation,
-  saveMessage,
-  createLeadRecord,
-  createPaymentRecord,
-  getPaymentByBooking
-} from "../services/database.js";
+
 
 /*
 |--------------------------------------------------------------------------
