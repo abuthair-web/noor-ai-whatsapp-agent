@@ -286,7 +286,9 @@ export const tools = {
  */
  get_rooms: {
  description:
- "Get the hotel's room types, prices, capacities and descriptions. Use this when the customer asks what rooms the hotel has or asks about  parameters: {
+ "Get the hotel's room types, prices, capacities and descriptions. Use this when the customer asks what rooms the hotel has or asks
+about room types, prices or capacity.",
+ parameters: {
  type: Type.OBJECT,
  properties: {}
  },
@@ -299,7 +301,9 @@ export const tools = {
  */
  search_availability: {
  description:
- "Check real room availability for specific check-in and check-out dates and number of guests. Always use this before telling the customer parameters: {
+ "Check real room availability for specific check-in and check-out dates and number of guests. Always use this before telling the
+customer a room is available.",
+ parameters: {
  type: Type.OBJECT,
  properties: {
  check_in: {
@@ -379,7 +383,9 @@ export const tools = {
  */
  create_booking: {
  description:
- "Create a hotel booking only after the customer has selected a room and provided their full name, check-in date, check-out date and numbe parameters: {
+ "Create a hotel booking only after the customer has selected a room and provided their full name, check-in date, check-out date and
+number of guests.",
+ parameters: {
  type: Type.OBJECT,
  properties: {
  customer_name: {
@@ -425,7 +431,9 @@ export const tools = {
  },
  get_booking: {
  description:
- "Get the details and current status of the current customer's booking using its booking ID. The booking must belong to the current WhatsA parameters: {
+ "Get the details and current status of the current customer's booking using its booking ID. The booking must belong to the current
+WhatsApp customer.",
+ parameters: {
  type: Type.OBJECT,
  properties: {
  booking_id: {
@@ -440,7 +448,9 @@ export const tools = {
  },
  get_customer_bookings: {
  description:
- "Get the current WhatsApp customer's previous and current hotel bookings. Prefer the current customer identity from conversation context; parameters: {
+ "Get the current WhatsApp customer's previous and current hotel bookings. Prefer the current customer identity from conversation
+context.",
+ parameters: {
  type: Type.OBJECT,
  properties: {
  phone: {
@@ -475,7 +485,9 @@ export const tools = {
  },
  modify_booking: {
  description:
- "Modify the current customer's existing booking. Use this when the customer requests changes to dates, room or guest count. Availability  parameters: {
+ "Modify the current customer's existing booking. Use this when the customer requests changes to dates, room or guest count. Check
+availability before confirming changes.",
+ parameters: {
  type: Type.OBJECT,
  properties: {
  booking_id: {
@@ -595,7 +607,9 @@ export const tools = {
  */
  create_payment_record: {
  description:
- "Create a manual pending payment record only when no payment record exists for the booking. Do not call this immediately after create_boo parameters: {
+ "Create a manual pending payment record only when no payment record exists for the booking. Do not call this immediately after
+create_booking.",
+ parameters: {
  type: Type.OBJECT,
  properties: {
  booking_id: {
