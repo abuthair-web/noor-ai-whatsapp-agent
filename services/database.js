@@ -2,6 +2,7 @@ import { createClient } from "@supabase/supabase-js";
 
 let supabase = null;
 
+
 /*
 |--------------------------------------------------------------------------
 | SUPABASE CLIENT
@@ -9,6 +10,7 @@ let supabase = null;
 */
 
 export function getSupabase() {
+
   if (!process.env.SUPABASE_URL) {
     throw new Error(
       "SUPABASE_URL is not configured."
@@ -22,6 +24,7 @@ export function getSupabase() {
   }
 
   if (!supabase) {
+
     supabase = createClient(
       process.env.SUPABASE_URL,
       process.env.SUPABASE_SECRET_KEY,
@@ -48,6 +51,7 @@ export function getSupabase() {
 export async function getBusinessFromDatabase(
   businessId
 ) {
+
   const db = getSupabase();
 
   const { data, error } = await db
@@ -76,6 +80,7 @@ export async function getCustomerByPhone(
   businessId,
   phone
 ) {
+
   const db = getSupabase();
 
   const { data, error } = await db
@@ -101,6 +106,7 @@ export async function createCustomerRecord({
   phone,
   email = null
 }) {
+
   const db = getSupabase();
 
   const { data, error } = await db
@@ -140,6 +146,7 @@ export async function getAvailableRooms({
   businessId,
   guests
 }) {
+
   const db = getSupabase();
 
   const { data, error } = await db
@@ -166,6 +173,7 @@ export async function getRoom(
   businessId,
   roomId
 ) {
+
   const db = getSupabase();
 
   const { data, error } = await db
@@ -196,6 +204,7 @@ export async function getOverlappingBookings({
   checkIn,
   checkOut
 }) {
+
   const db = getSupabase();
 
   const { data, error } = await db
@@ -236,6 +245,7 @@ export async function createBookingRecord({
   guests,
   totalAmount
 }) {
+
   const db = getSupabase();
 
   const { data, error } = await db
@@ -271,6 +281,7 @@ export async function getBookingById(
   businessId,
   bookingId
 ) {
+
   const db = getSupabase();
 
   const { data, error } = await db
@@ -302,6 +313,7 @@ export async function getCustomerBookings({
   businessId,
   customerId
 }) {
+
   const db = getSupabase();
 
   const { data, error } = await db
@@ -328,6 +340,7 @@ export async function updateBooking(
   bookingId,
   updates
 ) {
+
   const db = getSupabase();
 
   const { data, error } = await db
@@ -361,6 +374,7 @@ export async function getOrCreateConversation({
   businessId,
   customerId
 }) {
+
   const db = getSupabase();
 
   const {
@@ -418,6 +432,7 @@ export async function saveMessage({
   senderType,
   message
 }) {
+
   const db = getSupabase();
 
   const { data, error } = await db
@@ -455,6 +470,7 @@ export async function createLeadRecord({
   status = "new",
   notes = null
 }) {
+
   const db = getSupabase();
 
   const { data, error } = await db
@@ -492,11 +508,13 @@ export async function createPaymentRecord({
   provider = "razorpay",
   providerPaymentId = null,
   razorpayOrderId = null,
+  razorpayPaymentLinkId = null,
   razorpaySignature = null,
   amount,
   currency = "INR",
   status = "pending"
 }) {
+
   const db = getSupabase();
 
   const { data, error } = await db
@@ -508,6 +526,8 @@ export async function createPaymentRecord({
       provider,
       provider_payment_id: providerPaymentId,
       razorpay_order_id: razorpayOrderId,
+      razorpay_payment_link_id:
+        razorpayPaymentLinkId,
       razorpay_signature: razorpaySignature,
       amount,
       currency,
@@ -536,6 +556,7 @@ export async function getPaymentByBooking(
   businessId,
   bookingId
 ) {
+
   const db = getSupabase();
 
   const { data, error } = await db
@@ -562,6 +583,7 @@ export async function getPaymentByBooking(
 export async function getPaymentByOrderId(
   razorpayOrderId
 ) {
+
   const db = getSupabase();
 
   const { data, error } = await db
@@ -580,16 +602,11 @@ export async function getPaymentByOrderId(
 }
 
 
-/*
-|--------------------------------------------------------------------------
-| PAYMENT UPDATE
-|--------------------------------------------------------------------------
-*/
-
 export async function updatePaymentByOrderId(
   razorpayOrderId,
   updates
 ) {
+
   const db = getSupabase();
 
   const { data, error } = await db
@@ -621,6 +638,7 @@ export async function updatePaymentByOrderId(
 export async function getPaymentByRazorpayPaymentId(
   razorpayPaymentId
 ) {
+
   const db = getSupabase();
 
   const { data, error } = await db
@@ -646,6 +664,7 @@ export async function getPaymentByRazorpayPaymentId(
 */
 
 export async function testDatabaseConnection() {
+
   const db = getSupabase();
 
   const { data, error } = await db
