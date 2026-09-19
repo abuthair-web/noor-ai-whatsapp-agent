@@ -40,7 +40,8 @@ export async function createRazorpayOrder({
     throw new Error("A valid payment amount is required.");
   }
 
-  const amountInPaise = Math.round(Number(amount) * 100);
+  const amountInPaise =
+    Math.round(Number(amount) * 100);
 
   const order = await client.orders.create({
     amount: amountInPaise,
@@ -57,6 +58,76 @@ export async function createRazorpayOrder({
     amount: order.amount,
     currency: order.currency,
     status: order.status,
+    booking_id: bookingId
+  };
+}
+
+/**
+ * Create a Razorpay Payment Link.
+ *
+ * This link can be sent directly to the customer
+ * through WhatsApp.
+ */
+export async function createRazorpayPaymentLink({
+  bookingId,
+  amount,
+  currency = "INR",
+  customerName,
+  customerPhone
+}) {
+  const client = getRazorpay();
+
+  if (!bookingId) {
+    throw new Error("Booking ID is required.");
+  }
+
+  if (!amount || Number(amount) <= 0) {
+    throw new Error("A valid payment amount is required.");
+  }
+
+  const amountInPaise =
+    Math.round(Number(amount) * 100);
+
+  const paymentLink =
+    await client.paymentLink.create({
+      amount: amountInPaise,
+      currency,
+      accept_partial: false,
+
+      reference_id:
+        String(bookingId).slice(0, 40),
+
+      description:
+        `Payment for hotel booking ${bookingId}`,
+
+      customer: {
+        name:
+          customerName || "WhatsApp Customer",
+
+        contact:
+          customerPhone || undefined
+      },
+
+      notify: {
+        sms: false,
+        email: false
+      },
+
+      reminder_enable: false,
+
+      notes: {
+        booking_id:
+          String(bookingId)
+      }
+    });
+
+  return {
+    success: true,
+    payment_link_id: paymentLink.id,
+    short_url: paymentLink.short_url,
+    amount: paymentLink.amount,
+    currency: paymentLink.currency,
+    status: paymentLink.status,
     booking_id: bookingId
   };
 }
@@ -82,20 +153,27 @@ export function verifyRazorpayPayment({
   }
 
   if (!process.env.RAZORPAY_KEY_SECRET) {
-    throw new Error("RAZORPAY_KEY_SECRET is not configured.");
+    throw new Error(
+      "RAZORPAY_KEY_SECRET is not configured."
+    );
   }
 
   const body = `${orderId}|${paymentId}`;
 
   const expectedSignature = crypto
-    .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
+    .createHmac(
+      "sha256",
+      process.env.RAZORPAY_KEY_SECRET
+    )
     .update(body)
     .digest("hex");
 
-  const isValid = crypto.timingSafeEqual(
-    Buffer.from(expectedSignature, "utf8"),
-    Buffer.from(signature, "utf8")
-  );
+  const isValid =
+    expectedSignature.length === signature.length &&
+    crypto.timingSafeEqual(
+      Buffer.from(expectedSignature, "utf8"),
+      Buffer.from(signature, "utf8")
+    );
 
   return {
     success: isValid,
@@ -117,7 +195,9 @@ export function verifyRazorpayWebhookSignature(
   }
 
   if (!signature) {
-    throw new Error("Razorpay webhook signature is required.");
+    throw new Error(
+      "Razorpay webhook signature is required."
+    );
   }
 
   if (!process.env.RAZORPAY_WEBHOOK_SECRET) {
@@ -134,10 +214,12 @@ export function verifyRazorpayWebhookSignature(
     .update(rawBody)
     .digest("hex");
 
-  const isValid = crypto.timingSafeEqual(
-    Buffer.from(expectedSignature, "utf8"),
-    Buffer.from(signature, "utf8")
-  );
+  const isValid =
+    expectedSignature.length === signature.length &&
+    crypto.timingSafeEqual(
+      Buffer.from(expectedSignature, "utf8"),
+      Buffer.from(signature, "utf8")
+    );
 
   return isValid;
 }
@@ -152,7 +234,5 @@ export async function fetchRazorpayPayment(paymentId) {
     throw new Error("Payment ID is required.");
   }
 
-  const payment = await client.payments.fetch(paymentId);
-
-  return payment;
+  return await client.payments.fetch(paymentId);
 }
