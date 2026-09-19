@@ -2,7 +2,6 @@ import { createClient } from "@supabase/supabase-js";
 
 let supabase = null;
 
-
 /*
 |--------------------------------------------------------------------------
 | SUPABASE CLIENT
@@ -10,7 +9,6 @@ let supabase = null;
 */
 
 export function getSupabase() {
-
   if (!process.env.SUPABASE_URL) {
     throw new Error(
       "SUPABASE_URL is not configured."
@@ -24,7 +22,6 @@ export function getSupabase() {
   }
 
   if (!supabase) {
-
     supabase = createClient(
       process.env.SUPABASE_URL,
       process.env.SUPABASE_SECRET_KEY,
@@ -36,7 +33,6 @@ export function getSupabase() {
         }
       }
     );
-
   }
 
   return supabase;
@@ -52,7 +48,6 @@ export function getSupabase() {
 export async function getBusinessFromDatabase(
   businessId
 ) {
-
   const db = getSupabase();
 
   const { data, error } = await db
@@ -81,7 +76,6 @@ export async function getCustomerByPhone(
   businessId,
   phone
 ) {
-
   const db = getSupabase();
 
   const { data, error } = await db
@@ -107,7 +101,6 @@ export async function createCustomerRecord({
   phone,
   email = null
 }) {
-
   const db = getSupabase();
 
   const { data, error } = await db
@@ -147,7 +140,6 @@ export async function getAvailableRooms({
   businessId,
   guests
 }) {
-
   const db = getSupabase();
 
   const { data, error } = await db
@@ -174,7 +166,6 @@ export async function getRoom(
   businessId,
   roomId
 ) {
-
   const db = getSupabase();
 
   const { data, error } = await db
@@ -205,7 +196,6 @@ export async function getOverlappingBookings({
   checkIn,
   checkOut
 }) {
-
   const db = getSupabase();
 
   const { data, error } = await db
@@ -246,7 +236,6 @@ export async function createBookingRecord({
   guests,
   totalAmount
 }) {
-
   const db = getSupabase();
 
   const { data, error } = await db
@@ -258,8 +247,11 @@ export async function createBookingRecord({
       check_in: checkIn,
       check_out: checkOut,
       guests: Number(guests),
+
+      // Booking is NOT confirmed until payment succeeds.
       status: "pending",
       payment_status: "pending",
+
       total_amount: totalAmount
     })
     .select("*")
@@ -279,7 +271,6 @@ export async function getBookingById(
   businessId,
   bookingId
 ) {
-
   const db = getSupabase();
 
   const { data, error } = await db
@@ -311,7 +302,6 @@ export async function getCustomerBookings({
   businessId,
   customerId
 }) {
-
   const db = getSupabase();
 
   const { data, error } = await db
@@ -338,7 +328,6 @@ export async function updateBooking(
   bookingId,
   updates
 ) {
-
   const db = getSupabase();
 
   const { data, error } = await db
@@ -372,17 +361,18 @@ export async function getOrCreateConversation({
   businessId,
   customerId
 }) {
-
   const db = getSupabase();
 
-  const { data: existing, error: findError } =
-    await db
-      .from("conversations")
-      .select("*")
-      .eq("business_id", businessId)
-      .eq("customer_id", customerId)
-      .eq("channel", "whatsapp")
-      .maybeSingle();
+  const {
+    data: existing,
+    error: findError
+  } = await db
+    .from("conversations")
+    .select("*")
+    .eq("business_id", businessId)
+    .eq("customer_id", customerId)
+    .eq("channel", "whatsapp")
+    .maybeSingle();
 
   if (findError) {
     throw new Error(
@@ -428,7 +418,6 @@ export async function saveMessage({
   senderType,
   message
 }) {
-
   const db = getSupabase();
 
   const { data, error } = await db
@@ -466,7 +455,6 @@ export async function createLeadRecord({
   status = "new",
   notes = null
 }) {
-
   const db = getSupabase();
 
   const { data, error } = await db
@@ -501,13 +489,14 @@ export async function createPaymentRecord({
   businessId,
   bookingId,
   customerId,
-  provider = null,
+  provider = "razorpay",
   providerPaymentId = null,
+  razorpayOrderId = null,
+  razorpaySignature = null,
   amount,
   currency = "INR",
   status = "pending"
 }) {
-
   const db = getSupabase();
 
   const { data, error } = await db
@@ -518,6 +507,8 @@ export async function createPaymentRecord({
       customer_id: customerId,
       provider,
       provider_payment_id: providerPaymentId,
+      razorpay_order_id: razorpayOrderId,
+      razorpay_signature: razorpaySignature,
       amount,
       currency,
       status
@@ -535,11 +526,16 @@ export async function createPaymentRecord({
 }
 
 
+/*
+|--------------------------------------------------------------------------
+| PAYMENT LOOKUP
+|--------------------------------------------------------------------------
+*/
+
 export async function getPaymentByBooking(
   businessId,
   bookingId
 ) {
-
   const db = getSupabase();
 
   const { data, error } = await db
@@ -563,6 +559,86 @@ export async function getPaymentByBooking(
 }
 
 
+export async function getPaymentByOrderId(
+  razorpayOrderId
+) {
+  const db = getSupabase();
+
+  const { data, error } = await db
+    .from("payments")
+    .select("*")
+    .eq("razorpay_order_id", razorpayOrderId)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(
+      `Failed to find payment by Razorpay order: ${error.message}`
+    );
+  }
+
+  return data;
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| PAYMENT UPDATE
+|--------------------------------------------------------------------------
+*/
+
+export async function updatePaymentByOrderId(
+  razorpayOrderId,
+  updates
+) {
+  const db = getSupabase();
+
+  const { data, error } = await db
+    .from("payments")
+    .update({
+      ...updates,
+      updated_at: new Date().toISOString()
+    })
+    .eq("razorpay_order_id", razorpayOrderId)
+    .select("*")
+    .single();
+
+  if (error) {
+    throw new Error(
+      `Failed to update payment: ${error.message}`
+    );
+  }
+
+  return data;
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| PAYMENT BY RAZORPAY PAYMENT ID
+|--------------------------------------------------------------------------
+*/
+
+export async function getPaymentByRazorpayPaymentId(
+  razorpayPaymentId
+) {
+  const db = getSupabase();
+
+  const { data, error } = await db
+    .from("payments")
+    .select("*")
+    .eq("razorpay_payment_id", razorpayPaymentId)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(
+      `Failed to find payment by Razorpay payment ID: ${error.message}`
+    );
+  }
+
+  return data;
+}
+
+
 /*
 |--------------------------------------------------------------------------
 | DATABASE HEALTH CHECK
@@ -570,7 +646,6 @@ export async function getPaymentByBooking(
 */
 
 export async function testDatabaseConnection() {
-
   const db = getSupabase();
 
   const { data, error } = await db
