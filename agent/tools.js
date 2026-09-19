@@ -18,7 +18,24 @@ import {
   createPaymentRecord,
   getPaymentByBooking
 } from "../services/database.js";
-
+import {
+  getSupabase,
+  getBusinessFromDatabase,
+  getCustomerByPhone,
+  createCustomerRecord,
+  getAvailableRooms,
+  getRoom,
+  getOverlappingBookings,
+  createBookingRecord,
+  getBookingById,
+  getCustomerBookings,
+  updateBooking,
+  getOrCreateConversation,
+  saveMessage,
+  createLeadRecord,
+  createPaymentRecord,
+  getPaymentByBooking
+} from "../services/database.js";
 
 /*
 |--------------------------------------------------------------------------
@@ -809,7 +826,7 @@ export const tools = {
   create_payment_record: {
 
     description:
-      "Create a pending payment record for a booking. This does not confirm payment. Payment confirmation must come from the payment gateway.",
+      "Create a manual pending payment record only when no payment record exists for the booking. Do not call this immediately after create_booking because create_booking already creates the Razorpay payment record.",
 
     parameters: {
 
@@ -838,7 +855,7 @@ export const tools = {
         provider: {
           type: Type.STRING,
           description:
-            "Payment provider name, if known."
+            "Payment provider name, if known. Razorpay is used for hotel bookings."
         }
 
       },
@@ -922,8 +939,16 @@ export const tools = {
 async function get_business_info(
   args = {},
   context = {}
-) {
+) {/*
+|--------------------------------------------------------------------------
+| BUSINESS INFORMATION
+|--------------------------------------------------------------------------
+*/
 
+async function get_business_info(
+  args = {},
+  context = {}
+) {
   const businessId =
     getBusinessId(context);
 
@@ -949,7 +974,6 @@ async function search_knowledge(
   { query = "" } = {},
   context = {}
 ) {
-
   const businessId =
     getBusinessId(context);
 
@@ -959,12 +983,10 @@ async function search_knowledge(
     );
 
   if (!query.trim()) {
-
     return {
       success: true,
       result: business
     };
-
   }
 
   const searchableBusiness =
@@ -980,13 +1002,11 @@ async function search_knowledge(
       searchQuery
     )
   ) {
-
     return {
       success: true,
       query,
       result: business
     };
-
   }
 
   return {
@@ -1008,7 +1028,6 @@ async function get_rooms(
   args = {},
   context = {}
 ) {
-
   const businessId =
     getBusinessId(context);
 
@@ -1031,11 +1050,9 @@ async function get_rooms(
       );
 
   if (error) {
-
     throw new Error(
       `Failed to load rooms: ${error.message}`
     );
-
   }
 
   return {
@@ -1059,66 +1076,52 @@ async function search_availability(
   } = {},
   context = {}
 ) {
-
   const businessId =
     getBusinessId(context);
 
   const guestCount =
     Number(guests);
 
-
   if (!check_in || !check_out) {
-
     return {
       success: false,
       message:
         "Check-in and check-out dates are required."
     };
-
   }
-
 
   if (
     !isValidDateString(check_in) ||
     !isValidDateString(check_out)
   ) {
-
     return {
       success: false,
       message:
         "Invalid date format. Use YYYY-MM-DD."
     };
-
   }
-
 
   if (
     new Date(`${check_out}T00:00:00Z`) <=
     new Date(`${check_in}T00:00:00Z`)
   ) {
-
     return {
       success: false,
       message:
         "Check-out date must be after check-in date."
     };
-
   }
-
 
   if (
     !Number.isInteger(guestCount) ||
     guestCount < 1
   ) {
-
     return {
       success: false,
       message:
         "Number of guests must be at least 1."
     };
-
   }
-
 
   const rooms =
     await getAvailableRooms({
@@ -1126,14 +1129,12 @@ async function search_availability(
       guests: guestCount
     });
 
-
   const overlappingBookings =
     await getOverlappingBookings({
       businessId,
       checkIn: check_in,
       checkOut: check_out
     });
-
 
   const bookedRoomIds =
     new Set(
@@ -1143,7 +1144,6 @@ async function search_availability(
       )
     );
 
-
   const availableRooms =
     rooms.filter(
       room =>
@@ -1151,7 +1151,6 @@ async function search_availability(
           room.room_id
         )
     );
-
 
   return {
     success: true,
@@ -1174,7 +1173,6 @@ async function get_customer(
   { phone } = {},
   context = {}
 ) {
-
   const customer =
     await resolveCustomer(
       context,
@@ -1203,7 +1201,6 @@ async function create_customer(
   } = {},
   context = {}
 ) {
-
   const businessId =
     getBusinessId(context);
 
@@ -1213,17 +1210,13 @@ async function create_customer(
       context.customerPhone
     );
 
-
   if (!name || !customerPhone) {
-
     return {
       success: false,
       message:
         "Customer name and WhatsApp phone number are required."
     };
-
   }
-
 
   const customer =
     await createCustomerRecord({
@@ -1232,7 +1225,6 @@ async function create_customer(
       phone: customerPhone,
       email
     });
-
 
   return {
     success: true,
@@ -1258,7 +1250,6 @@ async function create_booking(
   } = {},
   context = {}
 ) {
-
   const businessId =
     getBusinessId(context);
 
@@ -1270,7 +1261,6 @@ async function create_booking(
       customer_phone ||
       context.customerPhone
     );
-
 
   /*
   |--------------------------------------------------------------------------
@@ -1286,57 +1276,45 @@ async function create_booking(
     !customerPhone ||
     !guests
   ) {
-
     return {
       success: false,
       message:
         "Customer name, phone, room, dates and guest count are required."
     };
-
   }
-
 
   if (
     !Number.isInteger(guestCount) ||
     guestCount < 1
   ) {
-
     return {
       success: false,
       message:
         "Number of guests must be at least 1."
     };
-
   }
-
 
   if (
     !isValidDateString(check_in) ||
     !isValidDateString(check_out)
   ) {
-
     return {
       success: false,
       message:
         "Invalid booking dates. Use YYYY-MM-DD."
     };
-
   }
-
 
   if (
     new Date(`${check_out}T00:00:00Z`) <=
     new Date(`${check_in}T00:00:00Z`)
   ) {
-
     return {
       success: false,
       message:
         "Check-out date must be after check-in date."
     };
-
   }
-
 
   /*
   |--------------------------------------------------------------------------
@@ -1350,61 +1328,38 @@ async function create_booking(
       room_id
     );
 
-
   if (!room) {
-
     return {
       success: false,
       message:
         "The selected room could not be found."
     };
-
   }
-
 
   if (
     room.status !== "available"
   ) {
-
     return {
       success: false,
       message:
         "The selected room is currently unavailable."
     };
-
   }
-
 
   if (
     guestCount >
     Number(room.capacity)
   ) {
-
     return {
       success: false,
       message:
         `This room can accommodate up to ${room.capacity} guests.`
     };
-
   }
-
 
   /*
   |--------------------------------------------------------------------------
-  | IMPORTANT: Fresh availability check
-  |--------------------------------------------------------------------------
-  |
-  | This check uses the ACTUAL booking dates.
-  | Therefore, if the customer originally searched:
-  |
-  | 20 Sep → 21 Sep
-  |
-  | but later books:
-  |
-  | 25 Sep → 27 Sep
-  |
-  | the 25–27 Sep dates are checked again.
-  |
+  | Fresh availability check
   |--------------------------------------------------------------------------
   */
 
@@ -1415,7 +1370,6 @@ async function create_booking(
       checkOut: check_out
     });
 
-
   const roomAlreadyBooked =
     overlappingBookings.some(
       booking =>
@@ -1423,9 +1377,7 @@ async function create_booking(
         room_id
     );
 
-
   if (roomAlreadyBooked) {
-
     return {
       success: false,
       status:
@@ -1433,13 +1385,11 @@ async function create_booking(
       message:
         "Sorry, that room is not available for the requested dates. Please choose another room or dates."
     };
-
   }
-
 
   /*
   |--------------------------------------------------------------------------
-  | Customer
+  | Resolve customer
   |--------------------------------------------------------------------------
   */
 
@@ -1449,34 +1399,35 @@ async function create_booking(
       customerPhone
     );
 
-
   let customer;
 
-
-  if (
-    existingCustomer &&
-    existingCustomer.id ===
-      context.customerId
-  ) {
-
+  if (existingCustomer) {
     customer =
       await createCustomerRecord({
         businessId,
-        name: customer_name,
-        phone: existingCustomer.phone
+        name:
+          customer_name,
+        phone:
+          existingCustomer.phone
       });
-
   } else {
-
     customer =
       await createCustomerRecord({
         businessId,
-        name: customer_name,
-        phone: customerPhone
+        name:
+          customer_name,
+        phone:
+          customerPhone
       });
-
   }
 
+  if (!customer?.id) {
+    return {
+      success: false,
+      message:
+        "The customer record could not be created."
+    };
+  }
 
   /*
   |--------------------------------------------------------------------------
@@ -1490,11 +1441,20 @@ async function create_booking(
       check_out
     );
 
-
   const totalAmount =
     nights *
     Number(room.price_per_night);
 
+  if (
+    !Number.isFinite(totalAmount) ||
+    totalAmount <= 0
+  ) {
+    return {
+      success: false,
+      message:
+        "The booking total could not be calculated."
+    };
+  }
 
   /*
   |--------------------------------------------------------------------------
@@ -1518,27 +1478,171 @@ async function create_booking(
       totalAmount
     });
 
-
   if (!booking?.id) {
-
     return {
       success: false,
       message:
         "The booking could not be created."
     };
-
   }
 
+  /*
+  |--------------------------------------------------------------------------
+  | Create Razorpay order
+  |--------------------------------------------------------------------------
+  */
+
+  let razorpayOrder;
+
+  try {
+    razorpayOrder =
+      await createRazorpayOrder({
+        bookingId:
+          booking.id,
+        amount:
+          totalAmount,
+        currency:
+          room.currency ||
+          "INR"
+      });
+  } catch (error) {
+    console.error(
+      "Razorpay order creation failed:",
+      error
+    );
+
+    try {
+      await updateBooking(
+        businessId,
+        booking.id,
+        {
+          status:
+            "cancelled"
+        }
+      );
+    } catch (rollbackError) {
+      console.error(
+        "Booking rollback failed:",
+        rollbackError
+      );
+    }
+
+    return {
+      success: false,
+      message:
+        "The booking could not be prepared for payment. Please try again."
+    };
+  }
+
+  if (
+    !razorpayOrder?.success ||
+    !razorpayOrder?.order_id
+  ) {
+    try {
+      await updateBooking(
+        businessId,
+        booking.id,
+        {
+          status:
+            "cancelled"
+        }
+      );
+    } catch (rollbackError) {
+      console.error(
+        "Booking rollback failed:",
+        rollbackError
+      );
+    }
+
+    return {
+      success: false,
+      message:
+        "The payment order could not be created."
+    };
+  }
+
+  /*
+  |--------------------------------------------------------------------------
+  | Create pending payment record
+  |--------------------------------------------------------------------------
+  */
+
+  let payment;
+
+  try {
+    payment =
+      await createPaymentRecord({
+        businessId,
+        bookingId:
+          booking.id,
+        customerId:
+          customer.id,
+        provider:
+          "razorpay",
+        providerPaymentId:
+          null,
+        razorpayOrderId:
+          razorpayOrder.order_id,
+        razorpaySignature:
+          null,
+        amount:
+          totalAmount,
+        currency:
+          room.currency ||
+          "INR",
+        status:
+          "pending"
+      });
+  } catch (error) {
+    console.error(
+      "Payment record creation failed:",
+      error
+    );
+
+    try {
+      await updateBooking(
+        businessId,
+        booking.id,
+        {
+          status:
+            "cancelled"
+        }
+      );
+    } catch (rollbackError) {
+      console.error(
+        "Booking rollback failed:",
+        rollbackError
+      );
+    }
+
+    return {
+      success: false,
+      message:
+        "The payment record could not be created. Please try again."
+    };
+  }
+
+  if (!payment?.id) {
+    return {
+      success: false,
+      message:
+        "The payment record could not be created."
+    };
+  }
+
+  /*
+  |--------------------------------------------------------------------------
+  | Booking created, payment pending
+  |--------------------------------------------------------------------------
+  */
 
   return {
-
     success: true,
 
     status:
-      "booking_created",
+      "booking_created_payment_pending",
 
     booking: {
-
       id:
         booking.id,
 
@@ -1577,11 +1681,29 @@ async function create_booking(
 
       payment_status:
         booking.payment_status
+    },
 
+    payment: {
+      id:
+        payment.id,
+
+      provider:
+        "razorpay",
+
+      razorpay_order_id:
+        razorpayOrder.order_id,
+
+      amount:
+        razorpayOrder.amount,
+
+      currency:
+        razorpayOrder.currency,
+
+      status:
+        "pending"
     },
 
     customer
-
   };
 }
 
@@ -1596,17 +1718,13 @@ async function get_booking(
   { booking_id } = {},
   context = {}
 ) {
-
   if (!booking_id) {
-
     return {
       success: false,
       message:
         "Booking ID is required."
     };
-
   }
-
 
   const result =
     await getOwnedBooking(
@@ -1614,11 +1732,9 @@ async function get_booking(
       context
     );
 
-
   if (!result.success) {
     return result;
   }
-
 
   return {
     success: true,
@@ -1639,24 +1755,12 @@ async function get_customer_bookings(
   { phone } = {},
   context = {}
 ) {
-
   const businessId =
     getBusinessId(context);
-
 
   /*
   |--------------------------------------------------------------------------
   | FIRST: use trusted customer ID
-  |--------------------------------------------------------------------------
-  |
-  | This is the important fix.
-  |
-  | webhook.js already gives us:
-  |
-  | context.customerId
-  |
-  | So the model does NOT need to guess or provide the phone number.
-  |
   |--------------------------------------------------------------------------
   */
 
@@ -1666,9 +1770,7 @@ async function get_customer_bookings(
       phone
     );
 
-
   if (!customer) {
-
     return {
       success: true,
       customer_found: false,
@@ -1676,9 +1778,7 @@ async function get_customer_bookings(
       message:
         "No customer record was found for this WhatsApp conversation."
     };
-
   }
-
 
   const bookings =
     await getCustomerBookings({
@@ -1686,7 +1786,6 @@ async function get_customer_bookings(
       customerId:
         customer.id
     });
-
 
   return {
     success: true,
@@ -1710,17 +1809,13 @@ async function cancel_booking(
   } = {},
   context = {}
 ) {
-
   if (!booking_id) {
-
     return {
       success: false,
       message:
         "Booking ID is required."
     };
-
   }
-
 
   const ownership =
     await getOwnedBooking(
@@ -1728,44 +1823,35 @@ async function cancel_booking(
       context
     );
 
-
   if (!ownership.success) {
     return ownership;
   }
 
-
   const booking =
     ownership.booking;
-
 
   if (
     booking.status ===
     "cancelled"
   ) {
-
     return {
       success: true,
       status:
         "already_cancelled",
       booking
     };
-
   }
-
 
   if (
     booking.status ===
     "completed"
   ) {
-
     return {
       success: false,
       message:
         "A completed booking cannot be cancelled."
     };
-
   }
-
 
   const updatedBooking =
     await updateBooking(
@@ -1777,21 +1863,17 @@ async function cancel_booking(
       }
     );
 
-
   if (
     !updatedBooking ||
     updatedBooking.status !==
       "cancelled"
   ) {
-
     return {
       success: false,
       message:
         "The booking cancellation could not be confirmed."
     };
-
   }
-
 
   return {
     success: true,
@@ -1820,17 +1902,13 @@ async function modify_booking(
   } = {},
   context = {}
 ) {
-
   if (!booking_id) {
-
     return {
       success: false,
       message:
         "Booking ID is required."
     };
-
   }
-
 
   const ownership =
     await getOwnedBooking(
@@ -1838,43 +1916,34 @@ async function modify_booking(
       context
     );
 
-
   if (!ownership.success) {
     return ownership;
   }
 
-
   const booking =
     ownership.booking;
-
 
   if (
     booking.status ===
     "cancelled"
   ) {
-
     return {
       success: false,
       message:
         "A cancelled booking cannot be modified."
     };
-
   }
-
 
   if (
     booking.status ===
     "completed"
   ) {
-
     return {
       success: false,
       message:
         "A completed booking cannot be modified."
     };
-
   }
-
 
   const newCheckIn =
     check_in ||
@@ -1892,7 +1961,6 @@ async function modify_booking(
     guests ??
     booking.guests;
 
-
   /*
   |--------------------------------------------------------------------------
   | Validate dates
@@ -1903,47 +1971,37 @@ async function modify_booking(
     !isValidDateString(newCheckIn) ||
     !isValidDateString(newCheckOut)
   ) {
-
     return {
       success: false,
       message:
         "Invalid check-in or check-out dates. Use YYYY-MM-DD."
     };
-
   }
-
 
   if (
     new Date(`${newCheckOut}T00:00:00Z`) <=
     new Date(`${newCheckIn}T00:00:00Z`)
   ) {
-
     return {
       success: false,
       message:
         "Check-out date must be after check-in date."
     };
-
   }
-
 
   const guestCount =
     Number(newGuests);
-
 
   if (
     !Number.isInteger(guestCount) ||
     guestCount < 1
   ) {
-
     return {
       success: false,
       message:
         "Number of guests must be at least 1."
     };
-
   }
-
 
   /*
   |--------------------------------------------------------------------------
@@ -1957,45 +2015,35 @@ async function modify_booking(
       newRoomId
     );
 
-
   if (!room) {
-
     return {
       success: false,
       message:
         "Selected room was not found."
     };
-
   }
-
 
   if (
     room.status !==
     "available"
   ) {
-
     return {
       success: false,
       message:
         "Selected room is currently unavailable."
     };
-
   }
-
 
   if (
     guestCount >
     Number(room.capacity)
   ) {
-
     return {
       success: false,
       message:
         `This room can accommodate up to ${room.capacity} guests.`
     };
-
   }
-
 
   /*
   |--------------------------------------------------------------------------
@@ -2013,7 +2061,6 @@ async function modify_booking(
         newCheckOut
     });
 
-
   const conflict =
     overlappingBookings.some(
       existingBooking =>
@@ -2023,9 +2070,7 @@ async function modify_booking(
           booking_id
     );
 
-
   if (conflict) {
-
     return {
       success: false,
       status:
@@ -2033,9 +2078,7 @@ async function modify_booking(
       message:
         "The selected room is not available for those dates."
     };
-
   }
-
 
   /*
   |--------------------------------------------------------------------------
@@ -2049,11 +2092,9 @@ async function modify_booking(
       newCheckOut
     );
 
-
   const totalAmount =
     nights *
     Number(room.price_per_night);
-
 
   /*
   |--------------------------------------------------------------------------
@@ -2083,22 +2124,17 @@ async function modify_booking(
       }
     );
 
-
   if (
     !updatedBooking
   ) {
-
     return {
       success: false,
       message:
         "The booking could not be updated."
     };
-
   }
 
-
   return {
-
     success: true,
 
     status:
@@ -2108,7 +2144,6 @@ async function modify_booking(
       updatedBooking,
 
     room: {
-
       room_id:
         room.room_id,
 
@@ -2121,19 +2156,16 @@ async function modify_booking(
       currency:
         room.currency ||
         "INR"
-
     },
 
     nights,
 
     total_amount:
       totalAmount
-
   };
 }
 
-
-/*
+  /*
 |--------------------------------------------------------------------------
 | LEAD
 |--------------------------------------------------------------------------
@@ -2147,7 +2179,6 @@ async function create_lead(
   } = {},
   context = {}
 ) {
-
   const businessId =
     getBusinessId(context);
 
@@ -2157,24 +2188,19 @@ async function create_lead(
       context.customerPhone
     );
 
-
   if (!notes) {
-
     return {
       success: false,
       message:
         "Lead notes are required."
     };
-
   }
-
 
   const customer =
     await resolveCustomer(
       context,
       customerPhone
     );
-
 
   const lead =
     await createLeadRecord({
@@ -2188,17 +2214,13 @@ async function create_lead(
       notes
     });
 
-
   if (!lead?.id) {
-
     return {
       success: false,
       message:
         "The lead could not be created."
     };
-
   }
-
 
   return {
     success: true,
@@ -2217,10 +2239,8 @@ async function get_conversation(
   { phone } = {},
   context = {}
 ) {
-
   const businessId =
     getBusinessId(context);
-
 
   const customer =
     await resolveCustomer(
@@ -2228,17 +2248,13 @@ async function get_conversation(
       phone
     );
 
-
   if (!customer) {
-
     return {
       success: true,
       customer_found: false,
       conversation: null
     };
-
   }
-
 
   const conversation =
     await getOrCreateConversation({
@@ -2246,7 +2262,6 @@ async function get_conversation(
       customerId:
         customer.id
     });
-
 
   return {
     success: true,
@@ -2270,10 +2285,8 @@ async function save_message(
   } = {},
   context = {}
 ) {
-
   const businessId =
     getBusinessId(context);
-
 
   const customerPhone =
     normalizePhone(
@@ -2281,20 +2294,16 @@ async function save_message(
       context.customerPhone
     );
 
-
   if (
     !sender_type ||
     !message
   ) {
-
     return {
       success: false,
       message:
         "Sender type and message are required."
     };
-
   }
-
 
   let customer =
     await resolveCustomer(
@@ -2302,19 +2311,15 @@ async function save_message(
       customerPhone
     );
 
-
   if (!customer) {
 
     if (!customerPhone) {
-
       return {
         success: false,
         message:
           "Customer identity is required."
       };
-
     }
-
 
     customer =
       await createCustomerRecord({
@@ -2324,9 +2329,7 @@ async function save_message(
         phone:
           customerPhone
       });
-
   }
-
 
   const conversation =
     await getOrCreateConversation({
@@ -2334,7 +2337,6 @@ async function save_message(
       customerId:
         customer.id
     });
-
 
   const savedMessage =
     await saveMessage({
@@ -2348,17 +2350,13 @@ async function save_message(
       message
     });
 
-
   if (!savedMessage?.id) {
-
     return {
       success: false,
       message:
         "Message could not be saved."
     };
-
   }
-
 
   return {
     success: true,
@@ -2383,28 +2381,23 @@ async function create_payment(
   } = {},
   context = {}
 ) {
-
   const businessId =
     getBusinessId(context);
 
   const paymentAmount =
     Number(amount);
 
-
   if (
     !booking_id ||
     !Number.isFinite(paymentAmount) ||
     paymentAmount <= 0
   ) {
-
     return {
       success: false,
       message:
         "Booking ID and a valid positive payment amount are required."
     };
-
   }
-
 
   /*
   |--------------------------------------------------------------------------
@@ -2418,15 +2411,34 @@ async function create_payment(
       context
     );
 
-
   if (!ownership.success) {
     return ownership;
   }
 
-
   const customer =
     ownership.customer;
 
+  /*
+  |--------------------------------------------------------------------------
+  | Prevent duplicate manual payment records
+  |--------------------------------------------------------------------------
+  */
+
+  const existingPayment =
+    await getPaymentByBooking(
+      businessId,
+      booking_id
+    );
+
+  if (existingPayment) {
+    return {
+      success: true,
+      status:
+        "payment_already_exists",
+      payment:
+        existingPayment
+    };
+  }
 
   /*
   |--------------------------------------------------------------------------
@@ -2441,7 +2453,8 @@ async function create_payment(
         booking_id,
       customerId:
         customer.id,
-      provider,
+      provider:
+        provider || "razorpay",
       amount:
         paymentAmount,
       currency:
@@ -2450,17 +2463,13 @@ async function create_payment(
         "pending"
     });
 
-
   if (!payment?.id) {
-
     return {
       success: false,
       message:
         "The payment record could not be created."
     };
-
   }
-
 
   return {
     success: true,
@@ -2481,17 +2490,13 @@ async function get_payment_status(
   { booking_id } = {},
   context = {}
 ) {
-
   if (!booking_id) {
-
     return {
       success: false,
       message:
         "Booking ID is required."
     };
-
   }
-
 
   /*
   |--------------------------------------------------------------------------
@@ -2505,11 +2510,9 @@ async function get_payment_status(
       context
     );
 
-
   if (!ownership.success) {
     return ownership;
   }
-
 
   const payment =
     await getPaymentByBooking(
@@ -2517,17 +2520,13 @@ async function get_payment_status(
       booking_id
     );
 
-
   if (!payment) {
-
     return {
       success: true,
       payment_found: false,
       payment: null
     };
-
   }
-
 
   return {
     success: true,
@@ -2549,27 +2548,21 @@ async function transfer_to_human(
   } = {},
   context = {}
 ) {
-
   const businessId =
     getBusinessId(context);
-
 
   const customer =
     await resolveCustomer(
       context
     );
 
-
   if (!customer) {
-
     return {
       success: false,
       message:
         "The current customer could not be identified for human handoff."
     };
-
   }
-
 
   const conversation =
     await getOrCreateConversation({
@@ -2577,7 +2570,6 @@ async function transfer_to_human(
       customerId:
         customer.id
     });
-
 
   await saveMessage({
     businessId,
@@ -2594,10 +2586,8 @@ async function transfer_to_human(
       }`
   });
 
-
   const db =
     getSupabase();
-
 
   const { data, error } =
     await db
@@ -2616,20 +2606,15 @@ async function transfer_to_human(
       .select("*")
       .single();
 
-
   if (error) {
-
     return {
       success: false,
       message:
         `Human handoff could not be completed: ${error.message}`
     };
-
   }
 
-
   return {
-
     success: true,
 
     status:
@@ -2641,6 +2626,7 @@ async function transfer_to_human(
 
     conversation:
       data
-
   };
 }
+
+    
