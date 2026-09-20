@@ -1,4 +1,5 @@
 import { Type } from "@google/genai";
+
 import {
   getSupabase,
   getBusinessFromDatabase,
@@ -245,7 +246,6 @@ function buildRoomSummary(room) {
     description
   };
 }
-
 /**
  * Get business information.
  */
@@ -290,9 +290,10 @@ export async function getRooms(
     getBusinessId();
 
   const rooms =
-    await getAvailableRooms(
-      businessId
-    );
+    await getAvailableRooms({
+      businessId,
+      guests: 1
+    });
 
   return {
     success: true,
@@ -340,9 +341,10 @@ export async function searchAvailability(
   );
 
   const rooms =
-    await getAvailableRooms(
-      businessId
-    );
+    await getAvailableRooms({
+      businessId,
+      guests
+    });
 
   const available = [];
 
@@ -365,16 +367,25 @@ export async function searchAvailability(
     }
 
     const overlaps =
-      await getOverlappingBookings(
-        roomId,
+      await getOverlappingBookings({
+        businessId,
         checkIn,
         checkOut
-      );
+      });
 
-    if (
-      Array.isArray(overlaps) &&
-      overlaps.length > 0
-    ) {
+    const roomOverlaps =
+      Array.isArray(overlaps)
+        ? overlaps.filter(
+            booking =>
+              String(
+                booking?.room_id ??
+                booking?.roomId ??
+                ""
+              ) === String(roomId)
+          )
+        : [];
+
+    if (roomOverlaps.length > 0) {
       continue;
     }
 
@@ -397,7 +408,6 @@ export async function searchAvailability(
     rooms: available
   };
 }
-
 /**
  * Create a hotel booking and a Razorpay Payment Link.
  */
@@ -465,7 +475,10 @@ export async function createBooking(
   );
 
   const room =
-    await getRoom(roomId);
+    await getRoom(
+      businessId,
+      roomId
+    );
 
   if (!room) {
     throw new Error(
@@ -486,16 +499,25 @@ export async function createBooking(
   }
 
   const overlapping =
-    await getOverlappingBookings(
-      roomId,
+    await getOverlappingBookings({
+      businessId,
       checkIn,
       checkOut
-    );
+    });
 
-  if (
-    Array.isArray(overlapping) &&
-    overlapping.length > 0
-  ) {
+  const roomOverlaps =
+    Array.isArray(overlapping)
+      ? overlapping.filter(
+          booking =>
+            String(
+              booking?.room_id ??
+              booking?.roomId ??
+              ""
+            ) === String(roomId)
+        )
+      : [];
+
+  if (roomOverlaps.length > 0) {
     throw new Error(
       "The selected room is not available for those dates."
     );
@@ -524,8 +546,8 @@ export async function createBooking(
 
   const customer =
     await getCustomerByPhone(
-      customerPhone,
-      businessId
+      businessId,
+      customerPhone
     );
 
   let customerId =
@@ -568,8 +590,7 @@ export async function createBooking(
       "Booking was created but no booking ID was returned."
     );
   }
-
-  const razorpayPaymentLink =
+    const razorpayPaymentLink =
     await createRazorpayPaymentLink({
       bookingId,
       amount: totalAmount,
@@ -649,6 +670,10 @@ export async function getBooking(
       context
     );
 
+  const businessId =
+    context.businessId ||
+    getBusinessId();
+
   const bookingId =
     args.bookingId ||
     args.booking_id;
@@ -661,6 +686,7 @@ export async function getBooking(
 
   const booking =
     await getBookingById(
+      businessId,
       bookingId
     );
 
@@ -698,7 +724,6 @@ export async function getBooking(
     booking
   };
 }
-
 /**
  * Get the current customer's bookings.
  */
@@ -716,11 +741,19 @@ export async function getCustomerBookingsTool(
     context.businessId ||
     getBusinessId();
 
-  const bookings =
-    await getCustomerBookings(
-      customerPhone,
-      businessId
+  const customer =
+    await getCustomerByPhone(
+      businessId,
+      customerPhone
     );
+
+  const bookings =
+    customer?.id
+      ? await getCustomerBookings({
+          businessId,
+          customerId: customer.id
+        })
+      : [];
 
   return {
     success: true,
@@ -745,6 +778,11 @@ export async function modifyBooking(
       context
     );
 
+  const businessId =
+    args.businessId ||
+    context.businessId ||
+    getBusinessId();
+
   const bookingId =
     args.bookingId ||
     args.booking_id;
@@ -757,6 +795,7 @@ export async function modifyBooking(
 
   const booking =
     await getBookingById(
+      businessId,
       bookingId
     );
 
@@ -827,8 +866,7 @@ export async function modifyBooking(
       args.roomId ||
       args.room_id;
   }
-
-  if (
+    if (
     updates.check_in ||
     updates.check_out
   ) {
@@ -854,17 +892,30 @@ export async function modifyBooking(
       booking.room_id;
 
     const overlaps =
-      await getOverlappingBookings(
-        roomId,
-        newCheckIn,
-        newCheckOut,
-        bookingId
-      );
+      await getOverlappingBookings({
+        businessId,
+        checkIn: newCheckIn,
+        checkOut: newCheckOut
+      });
 
-    if (
-      Array.isArray(overlaps) &&
-      overlaps.length > 0
-    ) {
+    const roomOverlaps =
+      Array.isArray(overlaps)
+        ? overlaps.filter(
+            bookingItem =>
+              String(
+                bookingItem?.room_id ??
+                bookingItem?.roomId ??
+                ""
+              ) === String(roomId) &&
+              String(
+                bookingItem?.id ??
+                bookingItem?.booking_id ??
+                ""
+              ) !== String(bookingId)
+          )
+        : [];
+
+    if (roomOverlaps.length > 0) {
       throw new Error(
         "The selected room is not available for the new dates."
       );
@@ -877,6 +928,7 @@ export async function modifyBooking(
   ) {
     const room =
       await getRoom(
+        businessId,
         updates.room_id
       );
 
@@ -912,6 +964,7 @@ export async function modifyBooking(
 
   const updated =
     await updateBooking(
+      businessId,
       bookingId,
       updates
     );
@@ -934,6 +987,11 @@ export async function getPaymentStatus(
       context
     );
 
+  const businessId =
+    args.businessId ||
+    context.businessId ||
+    getBusinessId();
+
   const bookingId =
     args.bookingId ||
     args.booking_id;
@@ -946,6 +1004,7 @@ export async function getPaymentStatus(
 
   const booking =
     await getBookingById(
+      businessId,
       bookingId
     );
 
@@ -956,8 +1015,7 @@ export async function getPaymentStatus(
         "Booking not found."
     };
   }
-
-  const bookingPhone =
+    const bookingPhone =
     normalizePhone(
       booking.customer_phone ||
       booking.customerPhone ||
@@ -980,6 +1038,7 @@ export async function getPaymentStatus(
 
   const payment =
     await getPaymentByBooking(
+      businessId,
       bookingId
     );
 
@@ -1025,74 +1084,101 @@ export const tools = {
   get_business_info: {
     description:
       "Get complete information about the business, including name, type, description, phone, email and address.",
+
     parameters: {
       type: Type.OBJECT,
       properties: {}
     },
+
     execute: getBusinessInfo
   },
 
   get_rooms: {
     description:
       "Get the hotel's room types, prices, capacities and descriptions. Use this when the customer asks what rooms the hotel has or asks about room types or prices.",
+
     parameters: {
       type: Type.OBJECT,
       properties: {}
     },
+
     execute: getRooms
   },
 
   search_availability: {
     description:
       "Check real room availability for specific check-in and check-out dates and number of guests. Always use this before telling the customer whether a room is available.",
+
     parameters: {
       type: Type.OBJECT,
+
       properties: {
         check_in: {
           type: Type.STRING,
-          description: "Check-in date in YYYY-MM-DD format."
+          description:
+            "Check-in date in YYYY-MM-DD format."
         },
+
         check_out: {
           type: Type.STRING,
-          description: "Check-out date in YYYY-MM-DD format."
+          description:
+            "Check-out date in YYYY-MM-DD format."
         },
+
         guests: {
           type: Type.NUMBER,
-          description: "Number of guests."
+          description:
+            "Number of guests."
         }
       },
-      required: ["check_in", "check_out"]
+
+      required: [
+        "check_in",
+        "check_out"
+      ]
     },
+
     execute: searchAvailability
   },
-
-  create_booking: {
+    create_booking: {
     description:
       "Create a hotel booking only after the customer has selected a room and provided their full name, check-in date, check-out date and number of guests. This also creates a Razorpay Payment Link.",
+
     parameters: {
       type: Type.OBJECT,
+
       properties: {
         customer_name: {
           type: Type.STRING,
-          description: "Customer's full name."
+          description:
+            "Customer's full name."
         },
+
         room_id: {
           type: Type.STRING,
-          description: "Selected room ID."
+          description:
+            "Selected room ID."
         },
+
         check_in: {
           type: Type.STRING,
-          description: "Check-in date in YYYY-MM-DD format."
+          description:
+            "Check-in date in YYYY-MM-DD format."
         },
+
         check_out: {
           type: Type.STRING,
-          description: "Check-out date in YYYY-MM-DD format."
+          description:
+            "Check-out date in YYYY-MM-DD format."
         },
+
         guests: {
           type: Type.NUMBER,
-          description: "Number of guests."
+          description:
+            "Number of guests."
         }
       },
+
       required: [
         "customer_name",
         "room_id",
@@ -1101,80 +1187,113 @@ export const tools = {
         "guests"
       ]
     },
+
     execute: createBooking
   },
 
   get_booking: {
     description:
       "Get the details and current status of the current customer's booking using its booking ID. The booking must belong to the current WhatsApp customer.",
+
     parameters: {
       type: Type.OBJECT,
+
       properties: {
         booking_id: {
           type: Type.STRING,
-          description: "Booking ID."
+          description:
+            "Booking ID."
         }
       },
-      required: ["booking_id"]
+
+      required: [
+        "booking_id"
+      ]
     },
+
     execute: getBooking
   },
 
   get_customer_bookings: {
     description:
       "Get the current WhatsApp customer's previous and current hotel bookings.",
+
     parameters: {
       type: Type.OBJECT,
       properties: {}
     },
-    execute: getCustomerBookingsTool
+
+    execute:
+      getCustomerBookingsTool
   },
 
   modify_booking: {
     description:
       "Modify the current customer's existing booking. Use this when the customer requests changes to dates, room or guest count. Availability must be checked before changing the room or dates.",
+
     parameters: {
       type: Type.OBJECT,
+
       properties: {
         booking_id: {
           type: Type.STRING,
-          description: "Booking ID."
+          description:
+            "Booking ID."
         },
+
         check_in: {
           type: Type.STRING,
-          description: "New check-in date in YYYY-MM-DD format."
+          description:
+            "New check-in date in YYYY-MM-DD format."
         },
+
         check_out: {
           type: Type.STRING,
-          description: "New check-out date in YYYY-MM-DD format."
+          description:
+            "New check-out date in YYYY-MM-DD format."
         },
+
         room_id: {
           type: Type.STRING,
-          description: "New room ID."
+          description:
+            "New room ID."
         },
+
         guests: {
           type: Type.NUMBER,
-          description: "New number of guests."
+          description:
+            "New number of guests."
         }
       },
-      required: ["booking_id"]
+
+      required: [
+        "booking_id"
+      ]
     },
+
     execute: modifyBooking
   },
 
   get_payment_status: {
     description:
       "Get the current payment record and payment status for the current customer's booking.",
+
     parameters: {
       type: Type.OBJECT,
+
       properties: {
         booking_id: {
           type: Type.STRING,
-          description: "Booking ID."
+          description:
+            "Booking ID."
         }
       },
-      required: ["booking_id"]
+
+      required: [
+        "booking_id"
+      ]
     },
+
     execute: getPaymentStatus
   }
 
